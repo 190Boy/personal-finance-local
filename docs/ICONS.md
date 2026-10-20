@@ -1,3 +1,9 @@
+# iPhone 實機排查結果：改用內嵌圖示
+
+使用者回報 iOS 27；相同圖片在測試 A（外部 PNG URL）的加入主畫面預覽顯示文字替代圖示，測試 B（data:image/png;base64 內嵌）顯示錢包。這證實本機測試的內嵌方式可行，尚不能推論所有 iOS 27 裝置的根因。
+
+兩個正式 HTML 入口改用與測試 B 相同的內嵌 PNG；web/index.html 的 CSP 僅在 img-src 增加 data:，不放寬腳本、連線或 Worker 權限。Service Worker 快取版本同步更新。圖片來源仍為 web/icons/apple-touch-icon-v2.png；未來換圖需同步更新兩個 HTML 內嵌內容。正式頁面仍待使用者實機確認。
+
 # Safari 圖示快取排查
 
 HTML 改用 apple-touch-icon-v2.png（與原圖相同的 180×180 PNG），讓 Safari 使用新的圖示網址；根目錄與 web/ 入口均宣告，Service Worker 固定清單及快取版本同步更新。原圖保留以相容舊頁面。本次不改圖片設計，不代表 iPhone 實機已通過。
