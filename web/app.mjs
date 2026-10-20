@@ -14,7 +14,7 @@ const errorMessages={
  WORKER_FAILED:'本機 Worker 啟動失敗，請確認 PDF.js 與 Worker 版本一致及瀏覽器支援模組 Worker。',
  CANCELLED:'已取消並清除本次資料。',REPEATED_PDF:'此檔案已在本次頁面處理過。未重複加入資料；如需重新校正，先清除本次資料。',
  INVALID_COLUMNS:'手動欄位必須包含日期、摘要、支出、收入、餘額，百分比介於 0–100 且不可重複。',
- INVALID_OPENING:'期初餘額格式錯誤，請輸入完整數字。',EXCEL_MAPPING:'請確認日期、摘要、提款、存入、餘額欄位，且不可對應到同一欄。',EXCEL_EMPTY:'Excel 沒有可讀取的資料。',EXCEL_REQUIRED:'玉山請選銀行匯出的 .xls／.xlsx；中信請選 PDF。',EXCEL_FORMAT:'檔案內容不是支援的 Excel 格式。',EXCEL_ENCRYPTED:'目前不支援有開啟密碼的 Excel；未上傳檔案。',EXCEL_READ_FAILED:'Excel 無法讀取，請重新從銀行下載。',EXCEL_LIMIT:'Excel 超過 50,000 列、256 欄、20 張工作表或文字大小上限。',EXCEL_TIMEOUT:'Excel 讀取超過 30 秒，已停止並清除 Worker。',EXCEL_WORKER:'Excel 本機 Worker 無法啟動，請確認網站程式載入完整。'
+ INVALID_OPENING:'期初餘額格式錯誤，請輸入完整數字。',EXCEL_MAPPING:'請確認日期、摘要、提款、存入、餘額欄位，且不可對應到同一欄。',EXCEL_EMPTY:'Excel 沒有可讀取的資料。',EXCEL_REQUIRED:'玉山請選銀行匯出的 .xls／.xlsx；中信請選 PDF。',EXCEL_FORMAT:'檔案內容不是支援的 Excel 格式。',EXCEL_ENCRYPTED:'這種 Excel 加密方式尚未支援；未上傳檔案。',EXCEL_PASSWORD_REQUIRED:'這份 Excel 需要開啟密碼。請輸入密碼，再點本機解密並讀取 Excel。',EXCEL_WRONG_PASSWORD:'Excel 密碼錯誤，請重新輸入後重試。',EXCEL_PASSWORD_LENGTH:'Excel 密碼不可超過 255 個字元。',EXCEL_ENCRYPTION_UNSUPPORTED:'這份 Excel 的加密方式尚未支援；未上傳檔案。',EXCEL_DECRYPT_FAILED:'Excel 解密失敗，請確認檔案完整性與加密方式；未上傳檔案。',EXCEL_READ_FAILED:'Excel 無法讀取，請重新從銀行下載。',EXCEL_LIMIT:'Excel 超過 50,000 列、256 欄、20 張工作表或文字大小上限。',EXCEL_TIMEOUT:'Excel 讀取超過 30 秒，已停止並清除 Worker。',EXCEL_WORKER:'Excel 本機 Worker 無法啟動，請確認網站程式載入完整。'
 };
 const reasonNames={
  EXCEL_FORMULA:'來源含公式，未執行且須核對',EXCEL_CELL_ERROR:'來源含 Excel 錯誤值',EXCEL_ROW_WIDTH:'此列欄數與表頭不同',NON_HORIZONTAL_TEXT:'有未納入表格的文字',INVALID_DATE:'日期無效',INVALID_TIME:'時間無效',MISSING_SUMMARY:'缺少摘要',INVALID_AMOUNT:'金額無效',
@@ -55,7 +55,7 @@ function setBusy(value){
  busy=value;
  $('clearCache').disabled=value;
  for(const id of ['parse','bank','pdfFile','password','order','opening','account','manual','col-date','col-time','col-summary','col-expense','col-income','col-balance','col-note'])
-  $(id).disabled=value||(id==='parse'&&($('bank').value==='esun'?!tableDraft:!extractor));
+  $(id).disabled=value||(id==='parse'&&($('bank').value==='esun'?!$('pdfFile').files.length:!extractor));
  for(const el of $('excelOptions').querySelectorAll('select'))el.disabled=value;
  exportsEnabled();
 }
@@ -133,6 +133,7 @@ $('textDetails').addEventListener('toggle',()=>{
 });
 $('pdfForm').addEventListener('submit',async event=>{
  event.preventDefault();if(busy||($('bank').value==='ctbc'&&!extractor))return;
+ if($('bank').value==='esun'&&!tableDraft){let secret=$('password').value;$('password').value='';try{await prepareExcel(secret);}finally{secret='';}return;}
  const myRun=++run;discardPreview();controller=new AbortController();setBusy(true);
  let password=$('password').value; $('password').value='';
  let file=$('pdfFile').files[0],digest=null,documentHash=null;
@@ -189,7 +190,7 @@ $('csv').addEventListener('click',()=>download('csv'));
 $('json').addEventListener('click',()=>download('json'));
 $('confirmExport').addEventListener('change',exportsEnabled);
 $('clear').addEventListener('click',clearAll);
-$('pdfFile').addEventListener('change',()=>{if($('bank').value==='esun'){void prepareExcel();return;}discardPreview();$('password').value='';status('已選檔。請輸入密碼後開始本機解析。');});
+$('pdfFile').addEventListener('change',()=>{if($('bank').value==='esun'){$('password').value='';void prepareExcel();return;}discardPreview();$('password').value='';status('已選檔。請輸入密碼後開始本機解析。');});
 window.addEventListener('pagehide',clearAll);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)$('password').value='';});
 $('clearData').addEventListener('click',()=>{clearAll();$('settingsNotice').textContent='已清除本次 PDF 與交易預覽。';});
@@ -234,29 +235,32 @@ function selectExcelSheet(){
  $('excelHeader').replaceChildren();
  tableDraft.rows.slice(0,30).forEach((r,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent='第 '+r.line+' 列：'+r.cells.join(' ／ ').slice(0,100);$('excelHeader').append(o);});
  $('excelHeader').value=String(tableDraft.headerIndex);fillExcelMapping();
+ $('parse').textContent='核對欄位並解析 Excel';
  $('excelInfo').textContent='Excel 已在本機讀取；請確認工作表、表頭及欄位對應，再點「本機讀取並解析 Excel」。';
  setBusy(false);
 }
-async function prepareExcel(){
+async function prepareExcel(password=''){
+ controller?.abort();
+ $('parse').textContent='本機解密並讀取 Excel';
  const generation=++run;discardPreview();tableDraft=null;excelBook=null;$('password').value='';
  $('excelMapping').replaceChildren();$('excelHeader').replaceChildren();$('excelSheet').replaceChildren();$('excelInfo').textContent='';
  const file=$('pdfFile').files[0];if(!file){setBusy(false);return;}
  controller=new AbortController();setBusy(true);status('正在裝置內讀取 Excel…');
  try{
   if(!/\.xlsx?$/i.test(file.name))throw Error('EXCEL_REQUIRED');
-  const book=await readLocalExcel(file,{signal:controller.signal});
+  const book=await readLocalExcel(file,{signal:controller.signal,password});
   if(generation!==run)return;excelBook=book;
   book.sheets.forEach((s,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent=s.name;$('excelSheet').append(o);});
   // Select the sheet with the best matching header; every choice stays visible.
   let best=0,score=-1;book.sheets.forEach((s,i)=>{const found=inspectTable(s.rows);if(found.score>score){best=i;score=found.score;}});
   $('excelSheet').value=String(best);selectExcelSheet();status('Excel 已在本機讀取，請確認欄位對應。');
  }catch(error){if(generation===run){tableDraft=null;excelBook=null;status(errorMessages[error.message]||'Excel 無法讀取，請確認檔案格式。');}}
- finally{if(generation===run){controller=null;setBusy(false);}}
+ finally{password='';if(generation===run){controller=null;setBusy(false);}}
 }
 function updateSource(){
- const excel=$('bank').value==='esun';$('passwordField').hidden=excel;$('pdfColumns').hidden=excel;$('excelOptions').hidden=!excel;
+ const excel=$('bank').value==='esun';$('passwordField').hidden=false;$('passwordLabel').textContent=excel?'Excel 開啟密碼（有加密才需填）':'PDF 開啟密碼';$('password').placeholder=excel?'選檔後輸入；只在本機解密':'僅供本次記憶體內解密';$('pdfColumns').hidden=excel;$('excelOptions').hidden=!excel;
  $('fileLabel').textContent=excel?'玉山銀行 Excel':'中信銀行 PDF';$('pdfFile').accept=excel?'.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'.pdf,application/pdf';
- $('parse').textContent=excel?'本機讀取並解析 Excel':'本機解密並解析';
+ $('parse').textContent=excel?(tableDraft?'核對欄位並解析 Excel':'本機解密並讀取 Excel'):'本機解密並解析';
  setBusy(false);
 }
 $('bank').addEventListener('change',()=>{clearAll();updateSource();$('order').value=$('bank').value==='esun'?'descending':'ascending';status($('bank').value==='esun'?'請選玉山銀行匯出的 Excel，再確認欄位。':'請選中信 PDF，最後輸入密碼。');});

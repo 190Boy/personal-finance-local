@@ -1,3 +1,13 @@
+# v0.4.1：玉山加密 XLSX 本機解密
+
+玉山 Excel 新增開啟密碼欄位。先選檔；如提示需要密碼，輸入後點「本機解密並讀取 Excel」，確認工作表與欄位，再點「核對欄位並解析 Excel」。選新檔會清空密碼；送出、切換銀行、離開或隱藏頁面也清空輸入欄。密碼只傳入專屬 Worker，讀取完成、取消或 30 秒逾時會終止 Worker；不寫入瀏覽器儲存、日誌或網路。
+
+新增自託管 officecrypto-tool 0.0.19 瀏覽器 bundle，支援經測試的 OOXML Standard AES-128/SHA-1 與 Agile 加密 XLSX。其他加密格式會提示不支援；加密 XLS 尚未納入此功能。加密 XLSX 使用 OLE 容器，不再直接誤判成格式錯誤。原有公式、錯誤值、手續費與餘額人工核對規則不變。
+
+驗證：30 項單元測試通過；Windows Chrome 專屬 Worker 驗證一般／Standard／Agile XLSX、未輸入／錯誤／正確密碼、重試、密碼欄清空、交易預覽與取消。真實樣本只在記憶體驗證解密及解析，仍有待人工核對列，不代表完整交易驗收；檔案與密碼不納入 Repo。iPhone Safari 實際解密仍待使用者確認。
+
+依賴來源：https://github.com/zurmokeeper/officecrypto-tool 。重建方式與固定版本位於 tools/officecrypto/，授權清單位於 web/vendor/officecrypto/THIRD_PARTY_NOTICES.txt。以下舊版限制以本節為準。
+
 # v0.4.0：玉山 Excel／中信 PDF 分流
 
 玉山改以銀行下載的 .xls／.xlsx 在瀏覽器讀取；中信維持 PDF.js 本機解密。玉山 PDF 解析程式保留為歷史來源與回歸測試，正式操作入口不再使用它。CSV／JSON 是預覽匯出格式，本版不提供 CSV 匯入。

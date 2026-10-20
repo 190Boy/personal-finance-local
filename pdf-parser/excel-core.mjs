@@ -5,7 +5,7 @@ export function readExcel(bytes,name,XLSX){
  const ext=name.toLowerCase().match(/\.(xlsx|xls)$/)?.[1];if(!ext)throw Error('EXCEL_REQUIRED');
  const data=new Uint8Array(bytes),zip=data[0]===80&&data[1]===75,ole=data[0]===208&&data[1]===207&&data[2]===17&&data[3]===224;
  let source=data,type='array';
- if(ext==='xlsx'&&!zip)throw Error('EXCEL_FORMAT');
+ if(ext==='xlsx'&&!zip)throw Error(ole?'EXCEL_PASSWORD_REQUIRED':'EXCEL_FORMAT');
  if(ext==='xls'&&!ole){
   let text;try{text=new TextDecoder('utf-8',{fatal:true}).decode(data);}catch{try{text=new TextDecoder('big5',{fatal:true}).decode(data);}catch{throw Error('EXCEL_FORMAT');}}
   if(!/^\s*(?:\uFEFF)?\s*(?:<\?xml|<!doctype\s+html|<html|<table)/i.test(text))throw Error('EXCEL_FORMAT');

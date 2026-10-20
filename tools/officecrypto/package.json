@@ -1,0 +1,1 @@
+{"private":true,"scripts":{"build":"node build.cjs"},"dependencies":{"officecrypto-tool":"0.0.19","browserify":"17.0.1","terser":"5.51.2"}}
