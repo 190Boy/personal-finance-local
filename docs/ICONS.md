@@ -1,3 +1,6 @@
+# v0.4.0 同步註記
+沿用使用者在 GitHub 更新的圖示；Apple Touch Icon 目前檔名為 apple-touch-icon.png。以下為舊版產製歷史，重跑 build-icons 前應先備份自訂圖示。
+
 # 圖示交接 v0.3.2
 
 source-wallet.png 是原始透明圖片；一般 PNG 只縮放，不 flatten。icon-32、180、192、512 保留 alpha。Apple Touch Icon 使用獨立 apple-touch-icon-180.png，與 maskable 圖示同為 #0756a4 藍底，這兩個系統用途的檔案刻意不透明。Manifest 的 any 與 maskable 用途保持分離。

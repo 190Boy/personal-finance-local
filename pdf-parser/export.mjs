@@ -1,4 +1,4 @@
-export const csvColumns=['bank','date','time','summary','expense','income','balance','fee','note','type_hint','page','end_page','errors','balance_check','review_status'];
+export const csvColumns=['bank','date','time','summary','expense','income','balance','fee','note','type_hint','source_type','source_line','page','end_page','errors','balance_check','review_status'];
 const amount=c=>Number.isSafeInteger(c)?(c/100).toFixed(2):'';
 function safeText(s){
  const value=String(s??'');
@@ -10,7 +10,7 @@ export function toCSV(result){
  const lines=[csvColumns.map(cell).join(',')];
  for(const t of result.transactions){
   const row=[safeText(t.bank),t.date,t.time,safeText(t.summary),amount(t.expenseCents),amount(t.incomeCents),
-   amount(t.balanceCents),amount(t.feeCents),safeText(t.note),safeText(t.typeHint),t.page,t.endPage,t.errors.join('|'),
+   amount(t.balanceCents),amount(t.feeCents),safeText(t.note),safeText(t.typeHint),result.sourceType||'pdf',t.sourceLine??t.line,t.page,t.endPage,t.errors.join('|'),
    t.balanceCheck?.status,t.reviewStatus];
   lines.push(row.map(cell).join(','));
  }

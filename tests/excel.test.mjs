@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {inspectTable,parseEsunTable} from '../pdf-parser/tabular.mjs';
+import {readExcel} from '../pdf-parser/excel-core.mjs';
+import {toCSV,toJSON} from '../pdf-parser/export.mjs';
+const require=createRequire(import.meta.url),XLSX=require('../web/vendor/sheetjs/xlsx.full.min.js');
+const header=['交易日期','交易時間','摘要','提','手續費','存','帳戶餘額','存摺備註','銀行代號/帳號','轉帳留言','財金序號'];
+const values=[header,['2026/09/02','12:30:01','跨行轉帳','',0,100,1100,'本機測試','','',''],['2026/09/01','08:00:00','連結帳戶交易',50,'','',1000,'虛構資料','','','']];
+const rows=()=>values.map((cells,i)=>({cells:cells.map(String),raw:[...cells],line:i+1}));
+const parse=(rs=rows(),o={})=>parseEsunTable({...inspectTable(rs),sheetName:'虛構交易'},{order:'descending',openingCents:105000,...o});
+function bytes(bookType='xlsx',modify=()=>{}){
+ const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(values);modify(sheet,book);
+ XLSX.utils.book_append_sheet(book,sheet,'虛構交易');
+ return XLSX.write(book,{type:'array',bookType});
+}
+test('reported E.SUN Excel headers map withdrawal, fee and deposit to distinct columns',()=>{const d=inspectTable(rows());assert.equal(d.mapping.expense,3);assert.equal(d.mapping.fee,4);assert.equal(d.mapping.income,5);assert.equal(d.mapping.note,7);const r=parse();assert.equal(r.balance.complete,true);assert.equal(r.transactions[0].incomeCents,10000);assert.equal(r.transactions[1].expenseCents,5000);assert.equal(r.transactions[0].sourceLine,2);assert.equal(r.transactions[0].time,'12:30:01');});
+test('Excel fee never becomes debit on a deposit and remains reviewable',()=>{const rs=rows();rs[1].raw[4]=15;const r=parse(rs),t=r.transactions[0];assert.equal(t.expenseCents,0);assert.equal(t.incomeCents,10000);assert.equal(t.feeCents,1500);assert.ok(t.errors.includes('FEE_REQUIRES_REVIEW'));assert.ok(!t.errors.includes('BOTH_DIRECTIONS'));assert.equal(r.balance.complete,false);});
+for(const kind of ['xlsx','biff8'])test(kind+' genuine binary workbook is read locally',()=>{const b=bytes(kind),book=readExcel(b,kind==='xlsx'?'fake.xlsx':'fake.xls',XLSX);const d={...inspectTable(book.sheets[0].rows),date1904:book.date1904,sheetName:book.sheets[0].name};assert.equal(parseEsunTable(d,{openingCents:105000}).balance.complete,true);assert.equal(book.libraryVersion,'0.20.3');});
+test('Excel number dates and fractional-day times are normalized without host timezone shifts',()=>{const rs=rows();rs[1].raw[0]=46267;rs[1].raw[1]=.5;const r=parse(rs);assert.equal(r.transactions[0].date,'2026-09-02');assert.equal(r.transactions[0].time,'12:00:00');});
+test('Excel 1904 epoch and invalid phantom 1900 leap day are explicit',()=>{const rs=rows();rs[1].raw[0]=44805;const d={...inspectTable(rs),date1904:true};assert.equal(parseEsunTable(d).transactions[0].date,'2026-09-02');rs[1].raw[0]=60;assert.ok(parse(rs).transactions[0].errors.includes('INVALID_DATE'));});
+test('formula cached values cannot silently pass review',()=>{const b=bytes('xlsx',s=>{s.F2={t:'n',v:100,f:'1+99'};}),book=readExcel(b,'fake.xlsx',XLSX);const r=parseEsunTable(inspectTable(book.sheets[0].rows));assert.ok(r.transactions[0].errors.includes('EXCEL_FORMULA'));assert.equal(r.validation.fieldChecksPass,false);});
+test('HTML-disguised .xls is parsed as data without inserting HTML into the app',()=>{const html='<html><head><meta charset="utf-8"></head><body><table>'+values.map(r=>'<tr>'+r.map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</table><script>throw Error("DO_NOT_RUN")</script></body></html>';const b=new TextEncoder().encode(html),book=readExcel(b,'fake.xls',XLSX);assert.equal(parseEsunTable(inspectTable(book.sheets[0].rows),{openingCents:105000}).balance.complete,true);});
+test('unknown, encrypted and unsupported inputs do not become successful transactions',()=>{assert.throws(()=>readExcel(new Uint8Array([1,2,3]),'fake.xlsx',XLSX),/EXCEL_FORMAT/);assert.throws(()=>readExcel(new TextEncoder().encode('a,b,c'),'fake.xls',XLSX),/EXCEL_FORMAT/);assert.throws(()=>readExcel(bytes(),'fake.xlsm',XLSX),/EXCEL_REQUIRED/);});
+test('manual mapping supports different labels but never duplicates a required column',()=>{const rs=rows();rs[0].cells=header.map((_,i)=>'欄'+i);const d=inspectTable(rs);assert.throws(()=>parseEsunTable(d),/EXCEL_MAPPING/);const mapping={date:0,time:1,summary:2,expense:3,fee:4,income:5,balance:6,note:7};assert.equal(parseEsunTable(d,{mapping,openingCents:105000}).balance.complete,true);assert.throws(()=>parseEsunTable(d,{mapping:{...mapping,income:3}}),/EXCEL_MAPPING/);});
+test('incomplete rows and invalid amounts stay visible and block acceptance',()=>{const rs=rows();rs.push({cells:['合計'],raw:['合計'],line:4});const r=parse(rs);assert.equal(r.transactions.length,3);assert.ok(r.transactions.at(-1).errors.includes('EXCEL_ROW_WIDTH'));rs[1].raw[6]='不明';assert.equal(parse(rs).transactions[0].balanceCents,null);});
+test('missing opening and wrong order never appear as complete acceptance',()=>{assert.equal(parse(rows(),{openingCents:null}).balance.complete,false);assert.ok(parse(rows(),{order:'ascending'}).issues.some(i=>i.code==='ORDER_MISMATCH'));});
+test('duplicate rows retained and repeated header ignored',()=>{const rs=rows();rs.push({...rs[0],line:4},{...rs[2],line:5});const r=parse(rs);assert.equal(r.transactions.length,3);assert.ok(r.transactions[1].errors.includes('DUPLICATE_CANDIDATE'));});
+test('preview exports preserve independent fee and guard formula injection text',()=>{const rs=rows();rs[1].raw[2]='=FAKE()';const r=parse(rs);assert.ok(toCSV(r).includes("'=FAKE()"));const j=JSON.parse(toJSON(r));assert.equal(j.sourceType,'excel');assert.equal(j.transactions[0].sourceLine,2);});
+test('oversized dimensions and sheets are rejected instead of silent truncation',()=>{const stub={read:()=>({SheetNames:['x'],Sheets:{x:{'!ref':'A1:XFD2'}}}),utils:XLSX.utils};assert.throws(()=>readExcel(new Uint8Array([80,75,3,4]),'x.xlsx',stub),/EXCEL_LIMIT/);});

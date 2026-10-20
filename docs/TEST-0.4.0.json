@@ -1,0 +1,20 @@
+{
+  "version": "0.4.0",
+  "unitTests": {
+    "passed": 52,
+    "failed": 0,
+    "excelCases": 15
+  },
+  "browser": "Windows Chrome 155.0.8059.84",
+  "browserChecks": {
+    "excel": 11,
+    "ctbcPdf": 12,
+    "pwa": 8
+  },
+  "realEsunWorkbook": "not received; user acceptance pending",
+  "realCtbcPdf": "not received; user acceptance pending",
+  "iphoneSafari": "not tested",
+  "iphonePwa": "not tested",
+  "android": "not tested",
+  "privacy": "Synthetic XLS/XLSX loaded using same-origin Worker; no request body/query; caches and storage exclude private fixture rows."
+}

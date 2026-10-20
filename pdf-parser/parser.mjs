@@ -84,7 +84,7 @@ function columnFields(line,columns){
  }
  return Object.fromEntries(Object.entries(out).map(([key,items])=>[key,items.map(t=>t.str).join(' ').trim()]));
 }
-function transactionHint(s){
+export function transactionHint(s){
  if(/信用卡|卡費/.test(s))return '信用卡繳款候選';
  if(/股利|股息|配息/.test(s))return '股利候選';
  if(/手續費|跨提費/.test(s))return '手續費候選';
@@ -92,7 +92,7 @@ function transactionHint(s){
  if(/退款|退費|沖正|取消/.test(s))return '退款／沖正候選';
  return '待分類';
 }
-function timeValue(s){
+export function timeValue(s){
  const t=norm(s);
  if(!t)return {value:null,issue:null}; // Source statement may not print time.
  const m=t.match(/(?:^|\s)(\d{2}):(\d{2})(?::(\d{2}))?(?:\s|$)/);
