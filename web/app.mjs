@@ -1,3 +1,4 @@
+import {applyExtractionWarnings} from '../pdf-parser/geometry.mjs';
 import {initPwa,clearPublicCache} from './pwa.mjs';
 import {parseStatement,moneyCents,groupLines,markCrossFileDuplicates} from '../pdf-parser/parser.mjs';
 import {toCSV,toJSON} from '../pdf-parser/export.mjs';
@@ -14,7 +15,7 @@ const errorMessages={
  INVALID_OPENING:'期初餘額格式錯誤，請輸入完整數字。'
 };
 const reasonNames={
- INVALID_DATE:'日期無效',INVALID_TIME:'時間無效',MISSING_SUMMARY:'缺少摘要',INVALID_AMOUNT:'金額無效',
+ NON_HORIZONTAL_TEXT:'有未納入表格的文字',INVALID_DATE:'日期無效',INVALID_TIME:'時間無效',MISSING_SUMMARY:'缺少摘要',INVALID_AMOUNT:'金額無效',
  INVALID_BALANCE:'餘額無效',ZERO_FLOW:'收入支出均為零',BOTH_DIRECTIONS:'同時有收入與支出',NEGATIVE_FLOW:'負數資金方向需核對',
  UNMAPPED_ROW:'欄位未定位',AMBIGUOUS_CONTINUATION:'跨行內容不明',DUPLICATE_CANDIDATE:'相同交易候選',
  CROSS_FILE_DUPLICATE_CANDIDATE:'其他 PDF 已有相同交易候選',HEADER_NOT_FOUND:'未找到表頭',
@@ -124,7 +125,7 @@ $('textDetails').addEventListener('toggle',()=>{
  if(!$('textDetails').open){$('rawText').textContent='';return;}
  if(!pages)return;
  $('rawText').textContent=pages.map(p=>'第 '+p.number+' 頁\n'+groupLines(p.items).map(l=>
-  l.items.map(i=>'['+(100*i.x/p.width).toFixed(1)+'%] '+i.str).join(' | ')).join('\n')).join('\n\n');
+  l.items.map(i=>'['+(100*i.x/p.width).toFixed(1)+'%] '+i.str).join(' | ')).join('\n')+(p.excludedItems?.length?'\n未納入表格的文字（請確認是否含交易）：\n'+p.excludedItems.map(i=>i.str).join('\n'):'')).join('\n\n');
 });
 $('pdfForm').addEventListener('submit',async event=>{
  event.preventDefault();if(busy||!extractor)return;
@@ -152,7 +153,7 @@ $('pdfForm').addEventListener('submit',async event=>{
   if(myRun!==run){extracted.pages.length=0;return;}
   pages=extracted.pages;
   status('正在依文字座標解析並檢查餘額…');
-  result=parseStatement(pages,options);
+  result=applyExtractionWarnings(parseStatement(pages,options),pages);
   markCrossFileDuplicates(result,seenTransactions,$('account').value.trim());
   result.document={...extracted.info,bytes:file.size}; // Excludes original filename and hash.
   seenFiles.add(documentHash);

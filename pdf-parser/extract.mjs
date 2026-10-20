@@ -1,3 +1,4 @@
+import {projectTextItem} from './geometry.mjs';
 import * as pdfjs from '../web/vendor/pdfjs/pdf.mjs';
 export const PDFJS_VERSION=pdfjs.version;
 export const LIMITS={bytes:25*1024*1024,pages:200,items:200000,characters:2000000,milliseconds:90000};
@@ -45,22 +46,20 @@ export async function extractLocalPdf(file,password,{signal,onProgress=()=>{}}={
    onProgress(number,pdf.numPages);
    const page=await guard(pdf.getPage(number));
    const viewport=page.getViewport({scale:1});
-   if(viewport.rotation%360!==0)throw new Error('ROTATED_PAGE');
    const text=await guard(page.getTextContent({includeMarkedContent:false,disableNormalization:false}));
-   const items=[];
+   const items=[],excludedItems=[];
    for(const it of text.items){
     if(!('str' in it)||!it.str.trim())continue;
-    // Bank statements are horizontal tables; fail closed for rotated text.
-    if(Math.abs(it.transform[1])>0.1||Math.abs(it.transform[2])>0.1)throw new Error('ROTATED_TEXT');
-    const [x,y]=viewport.convertToViewportPoint(it.transform[4],it.transform[5]);
-    items.push({str:it.str,x,y,w:Math.abs(it.width),h:Math.abs(it.height)});
+    const projected=projectTextItem(it,viewport);
+    if(projected.supported)items.push(projected.item);
+    else excludedItems.push({str:it.str,reason:projected.reason});
     totalChars+=it.str.length;totalItems++;
     if(totalChars>LIMITS.characters||totalItems>LIMITS.items)throw new Error('TEXT_LIMIT');
    }
-   pages.push({number,width:viewport.width,height:viewport.height,items});
+   pages.push({number,width:viewport.width,height:viewport.height,items,excludedItems});
    page.cleanup();
   }
-  return {pages,info:{pages:pdf.numPages,pdfjsVersion:pdfjs.version,characters:totalChars,items:totalItems}};
+  return {pages,info:{pages:pdf.numPages,pdfjsVersion:pdfjs.version,characters:totalChars,items:totalItems,excludedItems:pages.reduce((n,p)=>n+p.excludedItems.length,0)}};
  }catch(error){
   pages.length=0;
   if(abortReason)throw new Error(abortReason);
