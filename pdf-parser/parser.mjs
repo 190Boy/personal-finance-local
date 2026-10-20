@@ -1,5 +1,6 @@
+import {findEsunHeader,isEsunTime} from './esun-layout.mjs';
 // Coordinate parser. Bank profiles remain experimental until real statement acceptance.
-export const PARSER_VERSION = '0.2.0';
+export const PARSER_VERSION = '0.3.3';
 export const BANKS = {ctbc:'中國信託', esun:'玉山銀行'};
 const norm=s=>String(s??'').normalize('NFKC').trim();
 const compact=s=>norm(s).replace(/\s/g,'');
@@ -123,7 +124,7 @@ export function parseStatement(pages,options={}){
  const {bank,order='ascending',openingCents=null,columns:manual=null}=options;
  if(!BANKS[bank])throw new Error('BANK_REQUIRED');
  const transactions=[],issues=[],headers=[];
- let pending=null;let inherited=null;let datesSeen=0;
+ let pending=null;let inherited=null;let inheritedProfile=null;let datesSeen=0;
  const report=(code,page,line,detail='')=>issues.push({code,page,line,detail});
  function flush(){
   if(!pending)return;
@@ -131,7 +132,8 @@ export function parseStatement(pages,options={}){
   const date=parseDate(f.date||'');
   const fromDate=norm(f.date||'').replace(/^\*?\d{3,4}[\/.-]\d{1,2}[\/.-]\d{1,2}/,'').trim();
   const tm=timeValue(f.time||fromDate);
-  const expense=moneyCents(f.expense,{blank:true}),income=moneyCents(f.income,{blank:true}),balance=moneyCents(f.balance);
+  const mapped=!p.errors.includes('UNMAPPED_ROW');
+  const expense=mapped?moneyCents(f.expense,{blank:true}):null,income=mapped?moneyCents(f.income,{blank:true}):null,balance=moneyCents(f.balance);
   const errors=[...p.errors];
   if(!date)errors.push('INVALID_DATE');
   if(tm.issue)errors.push(tm.issue);
@@ -141,17 +143,20 @@ export function parseStatement(pages,options={}){
   if(expense===0&&income===0)errors.push('ZERO_FLOW');
   if(expense>0&&income>0)errors.push('BOTH_DIRECTIONS');
   if(expense<0||income<0)errors.push('NEGATIVE_FLOW');
+  const fee=p.feeText==null?null:moneyCents(p.feeText);
+  if(p.feeText!=null&&(fee===null||fee!==0))errors.push('FEE_REQUIRES_REVIEW');
   const t={bank:BANKS[bank],date,time:tm.value,summary:norm(f.summary),note:norm(f.note),
-   expenseCents:expense,incomeCents:income,balanceCents:balance,
+   expenseCents:expense,incomeCents:income,balanceCents:balance,feeCents:fee,
    typeHint:transactionHint((f.summary||'')+' '+(f.note||'')),
    page:p.page,endPage:p.endPage,line:p.line,errors:[...new Set(errors)],reviewStatus:'needs_review'};
   transactions.push(t);pending=null;
  }
  for(const page of pages){
   const lines=groupLines(page.items);
-  const header=manual?{columns:Object.fromEntries(Object.entries(manual).map(([k,v])=>[k,{x:v*page.width/100}])),y:-1,manual:true}:findHeader(lines);
+  const header=manual?{columns:Object.fromEntries(Object.entries(manual).map(([k,v])=>[k,{x:v*page.width/100}])),y:-1,manual:true}:(bank==='esun'?findEsunHeader(lines):null)||findHeader(lines);
   const columns=header?.columns||inherited;
-  if(header){inherited=header.columns;headers.push({page:page.number,manual:!!manual,fields:Object.keys(header.columns)});}
+  const stacked=(header?.profile||(!header?inheritedProfile:null))==='esun-stacked-v1';
+  if(header){inherited=header.columns;inheritedProfile=header.profile||null;headers.push({page:page.number,manual:!!manual,profile:header.profile||'generic',fields:Object.keys(header.columns)});}
   if(!columns){report('HEADER_NOT_FOUND',page.number,null,'無法可靠定位欄位；請使用欄位位置設定。');}
   for(let index=0;index<lines.length;index++){
    const line=lines[index],text=norm(line.text),compactText=compact(text);
@@ -165,7 +170,45 @@ export function parseStatement(pages,options={}){
     }
     continue;
    }
-   const fields=columnFields(line,columns),dateField=norm(fields.date);
+   const fields=columnFields(line,columns);
+   if(stacked){
+    // Date/time occupy the same physical column on different baselines.
+    const left=norm(fields.date);
+    const dateMatch=left.match(/^(\*?\d{3,4}[\/.-]\d{1,2}[\/.-]\d{1,2})(?:\s+|$)/);
+    if(dateMatch){
+     flush();datesSeen++;
+     const trailing=left.slice(dateMatch[1].length).trim();
+     fields.date=dateMatch[1];if(trailing)fields.time=trailing;
+     delete fields.serial;
+     if(fields.message){fields.note=[fields.note,fields.message].filter(Boolean).join(' ');delete fields.message;}
+     pending={fields,page:page.number,endPage:page.number,line:index+1,errors:[]};
+     continue;
+    }
+    if(left){fields.time=left;delete fields.date;}
+    delete fields.serial; // Bank serial is not needed for the transaction preview.
+    if(fields.message){fields.note=[fields.note,fields.message].filter(Boolean).join(' ');delete fields.message;}
+    if(pending){
+     const financial=['expense','income','balance'].filter(k=>norm(fields[k]));
+     const mainAlready=norm(pending.fields.balance);
+     // Printed fee is beneath withdrawal. Keep it separate, never guess if debit includes it.
+     if(mainAlready&&financial.length){
+      if(financial.length===1&&financial[0]==='expense'&&pending.feeText==null){
+       pending.feeText=fields.expense;delete fields.expense;
+      }else{pending.errors.push('AMBIGUOUS_CONTINUATION');report('AMBIGUOUS_CONTINUATION',page.number,index+1);}
+     }
+     for(const [k,v] of Object.entries(fields)){
+      if(!norm(v))continue;
+      if(['summary','note'].includes(k))pending.fields[k]=[pending.fields[k],v].filter(Boolean).join(' ');
+      else if(!norm(pending.fields[k]))pending.fields[k]=v;
+      else if(pending.fields[k]!==v)pending.errors.push('AMBIGUOUS_CONTINUATION');
+     }
+     pending.endPage=page.number;
+    }else if(['expense','income','balance'].some(k=>moneyCents(fields[k])!==null)){
+     report('ORPHAN_FINANCIAL_ROW',page.number,index+1,'有金額但沒有可識別日期。');
+    }
+    continue;
+   }
+   const dateField=norm(fields.date);
    const beginsDate=/^\*?\d{3,4}[\/.-]\d{1,2}[\/.-]\d{1,2}/.test(dateField);
    if(beginsDate){
     flush();datesSeen++;pending={fields,page:page.number,endPage:page.number,line:index+1,errors:[]};
@@ -193,7 +236,7 @@ export function parseStatement(pages,options={}){
  if(!transactions.length)report('NO_TRANSACTIONS',null,null,'可能是掃描檔、未知版型或無交易。未執行 OCR。');
  // Treat identical financial rows as review candidates, never delete them.
  const identities=new Map();
- transactions.forEach(t=>{const key=identity(t),prior=identities.get(key);
+ transactions.forEach(t=>{if(t.errors.length)return;const key=identity(t),prior=identities.get(key);
   if(prior){t.errors.push('DUPLICATE_CANDIDATE');prior.errors.push('DUPLICATE_CANDIDATE');}
   else identities.set(key,t);
  });
@@ -215,9 +258,10 @@ export function parseStatement(pages,options={}){
 export function markCrossFileDuplicates(result,seen,accountScope){
  if(!accountScope)return;
  for(const t of result.transactions){
+  if(t.errors.length)continue;
   const key=accountScope+'\u001f'+identity(t);
   if(seen.has(key))t.errors.push('CROSS_FILE_DUPLICATE_CANDIDATE');
  }
- for(const t of result.transactions)seen.add(accountScope+'\u001f'+identity(t));
+ for(const t of result.transactions)if(!t.errors.length||t.errors.every(e=>e==='CROSS_FILE_DUPLICATE_CANDIDATE'))seen.add(accountScope+'\u001f'+identity(t));
  result.validation.status='needs_review';
 }

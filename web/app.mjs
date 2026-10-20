@@ -17,7 +17,7 @@ const errorMessages={
 const reasonNames={
  NON_HORIZONTAL_TEXT:'有未納入表格的文字',INVALID_DATE:'日期無效',INVALID_TIME:'時間無效',MISSING_SUMMARY:'缺少摘要',INVALID_AMOUNT:'金額無效',
  INVALID_BALANCE:'餘額無效',ZERO_FLOW:'收入支出均為零',BOTH_DIRECTIONS:'同時有收入與支出',NEGATIVE_FLOW:'負數資金方向需核對',
- UNMAPPED_ROW:'欄位未定位',AMBIGUOUS_CONTINUATION:'跨行內容不明',DUPLICATE_CANDIDATE:'相同交易候選',
+ FEE_REQUIRES_REVIEW:'手續費需確認是否已含於提款額',UNMAPPED_ROW:'欄位未定位',AMBIGUOUS_CONTINUATION:'跨行內容不明',DUPLICATE_CANDIDATE:'相同交易候選',
  CROSS_FILE_DUPLICATE_CANDIDATE:'其他 PDF 已有相同交易候選',HEADER_NOT_FOUND:'未找到表頭',
  ORPHAN_FINANCIAL_ROW:'有金額但缺日期',BANK_MISMATCH:'銀行選擇與文件標記不一致',NO_TRANSACTIONS:'未識別交易',ORDER_MISMATCH:'交易順序不符'
 };
@@ -97,7 +97,7 @@ function render(){
    check.status==='no_opening'?'無起始餘額':'無法核對';
   const values=[t.date||'無效日期',t.time||'未提供',t.summary||'—',format(t.expenseCents),format(t.incomeCents),
    format(t.balanceCents),t.typeHint,t.page===t.endPage?t.page:t.page+'–'+t.endPage,
-   checkLabel,t.errors.length?[...new Set(t.errors)].map(k=>reasonNames[k]||k).join('、'):'仍需逐欄人工核對'];
+   checkLabel,(t.errors.length?[...new Set(t.errors)].map(k=>reasonNames[k]||k).join('、'):'仍需逐欄人工核對')+(t.feeCents!==null&&t.feeCents!==undefined?'；獨立手續費：'+format(t.feeCents):'')];
   values.forEach((v,i)=>{const cell=document.createElement('td');cell.textContent=String(v);
    if((i===8&&check.status==='fail')||(i===9&&t.errors.length))cell.className='bad';
    if(i===8&&check.status==='pass')cell.className='good';row.append(cell);});

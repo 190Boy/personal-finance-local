@@ -1,0 +1,18 @@
+{
+  "version": "0.3.3",
+  "unitTests": {
+    "passed": 37,
+    "failed": 0,
+    "esunStackedCoordinateCases": 9
+  },
+  "windowsChrome": {
+    "version": "155.0.8059.84",
+    "pdfRegressionPassed": 15,
+    "pwaChecksPassed": 8
+  },
+  "newLayoutEvidence": "fabricated coordinates matching reported labels and multiline structure; no real bank PDF tested",
+  "realEsunPdf": "user retest required",
+  "iphoneSafari": "not tested",
+  "android": "not tested",
+  "privacy": "No user account numbers, timestamps, amounts or transaction text used in fixtures; no new upload endpoints."
+}
