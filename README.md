@@ -1,2 +1,63 @@
-# personal-finance-local
-個人理財管理
+# 個人財務管理：Mobile First + PWA v0.3.0
+日期：2026-10-20。開發方向：GitHub Pages + Mobile First PWA + PDF.js 本機解密；Google OAuth／個人 Drive、Sheets 留待後續階段。
+
+這是可操作的測試頁，不是只有架構文件。已加入中國信託／玉山格式的表頭座標解析、預覽、餘額連續性檢查、CSV／JSON 預覽匯出。**尚未使用你的真實銀行 PDF 驗收，不能宣稱兩家銀行解析已完成。** 依最新決議，由你自行在裝置輸入密碼測試，不需將密碼提供給開發者。
+
+## 立即在 Windows 使用
+1. 將「完整原始碼」ZIP 全部解壓縮到一個資料夾，不要只取出 HTML。
+2. 雙擊根目錄 Start-Local.cmd。若已有 Node.js 或 Python 3 即可啟動，不需要安裝任何前端套件。兩者都沒有時，先從 nodejs.org 安裝 Node.js LTS，再重開啟動檔。
+3. 開啟 Windows Chrome，前往 http://127.0.0.1:4173/web/ 。測試期間保持啟動視窗開著；停止時按 Ctrl+C。
+4. 選銀行、選 PDF，然後輸入開啟密碼。選檔會先清空舊密碼，因此請最後輸入密碼。
+5. 選正確的原始交易順序；若知道最早交易之前的期初餘額，可填入以核對第一筆。
+6. 點「本機解密並解析」。逐筆比對日期、時間、摘要、支出、收入、交易後餘額和頁碼，再視需要勾選匯出預覽。
+不能直接雙擊 web/index.html；瀏覽器會限制本機檔案的模組與 Worker。
+
+## 兩個交付檔案包
+- FinanceLocalPDF-0.3.0-source.zip：完整可執行專案、文件、測試、既有 GAS 快照及所有自託管依賴。
+- FinanceLocalPDF-0.3.0-pages.zip：只包含可公開發布的 index.html、sw.js、.nojekyll、web/、pdf-parser/；不含 GAS、測試輸出或銀行 PDF。
+建議 Repository 名稱：personal-finance-local。由使用者自行建立，未代建或公開 Repository。發布方式見 docs/DEPLOY.md。
+
+## 已測與未測
+- Windows 安裝版 Google Chrome 155.0.8059.84：15 項端到端測試通過。
+- 17 項解析器與 5 項 Service Worker 排除／路由測試通過（共 22 項）。
+- 8 項 PWA 測試通過：Manifest／圖示／Repo 子路徑、手機導覽與卡片、快取排除、離線重開／解密、桌面表格、請求檢查與專案快取清除。
+- Python 3 備用本機伺服器的 GET、CSP、靜態路徑、拒絕 query／POST 檢查通過。
+- 合成 PDF 共兩套版型；各測 RC4-128、AES-128、AES-256，含兩頁、四筆交易與中文摘要。這些不是銀行原始樣本。
+- PDF 流程測試觀察到 79 個同站靜態 GET；PWA 額外測試觀察到 238 個公開資源請求，無 POST、request body 或 query 參數資料請求，無頁面 JavaScript 錯誤。
+- iPhone Safari 實機：未測。此環境沒有 iPhone／Safari 或 WebKit 執行環境，手機視窗尺寸測試僅代表版面，不代表 iOS 相容性。
+- 中信與玉山真實銀行樣本：由使用者自行測試，尚未正式驗收。
+驗收表見 docs/TESTING.md；機器可讀紀錄與合成畫面在 docs/。
+
+## 資料處理
+PDF 與密碼只在瀏覽器記憶體處理；PDF.js 本體、相同版本 Worker、CMaps、標準字型都隨程式提供，不依賴外部 CDN。沒有登入、後端解密、上傳端點、GAS 呼叫、Cloud Run、分析服務或正式入帳。
+密碼不寫 localStorage、sessionStorage、Cookie、Google Sheets 或日誌。每次處理後銷毀 PDF.js 任務與專屬 Worker；清除按鈕會清空預覽、文字與本次去重紀錄。不能保證瀏覽器或作業系統所有記憶體殘留都被覆寫。高權限惡意程式仍可能竊取輸入或解密資料。
+預覽、擷取文字、匯出檔可能包含敏感財務資料。匯出只在使用者勾選並點擊按鈕後產生，檔案由使用者保管。
+
+## 解析範圍與限制
+- 文字型、未旋轉、單一帳戶、單一新台幣交易表。未實作掃描 PDF OCR、多幣別、混合多帳戶、正式會計分錄或銀行 API。
+- 以 PDF 文字座標與列印表頭定位欄位，支援重複表頭、相鄰列摘要與部分跨頁延續。不是以餘額倒推未知收入或支出。
+- 日期支援西元／民國；金額使用整數分，避免二進位浮點誤差。原始交易無時間時輸出 null，不自行補造。
+- 未識別表頭時可試手動欄位中心百分比。所有未知／不完整／矛盾交易均標記待核對，不能算驗收通過。
+- 跨行日期／時間、特殊版型、文字缺字或頁尾混入可能需要依實際版型校正。偵測錯誤不代表所有錯誤都能自動發現。
+- 交易辨識提示包含跨行轉帳、信用卡繳款、股利、手續費、退款／沖正候選，只供人工確認。
+- 完整餘額核對需要最早交易前的餘額。不能只因後續連續性吻合就說全部通過，更不能認定摘要、時間與分類都正確。
+- 同頁面重複 PDF 用記憶體內 SHA-256 識別；相同交易僅標為重複候選，不刪除。填相同帳戶代碼可提示不同 PDF 的相同候選；沒有帳戶代碼時不做跨檔比對。重新整理或清除後不保留紀錄，未實作正式跨來源去重。
+- 匯出永遠是 needs_review 預覽。JSON 金額單位是整數分；CSV 為十進位金額、UTF-8 BOM，文字欄位有公式注入防護。帳戶代碼、檔名、密碼、PDF 本文不寫進交易 JSON；交易摘要本身可能仍包含個資。
+
+## 目錄
+- web/：可操作前端與完整自託管 PDF.js。
+- pdf-parser/：解密／座標文字擷取、解析、核對、匯出。
+- google-auth/：後續階段說明，尚未實作 OAuth。
+- legacy-gas/：既有三份 GAS 來源快照，原雲端文件和部署完全保留。
+- docs/：部署、測試、安全、架構交接、版本與測試結果。
+- tests/：可重跑的合成資料、解析器與瀏覽器測試。
+- tools/：只讀靜態伺服器與封裝工具。
+
+## 後續階段門檻
+第一階段必須由使用者在 Windows Chrome、iPhone Safari／主畫面 PWA 與 Android Chrome，以兩家銀行實際 PDF 逐欄、逐筆、逐頁核對並完成驗收表；只解密成功不算通過。在此之前，不開始 Google OAuth 多人版、不接正式帳務資料庫。
+
+## Mobile First 與 PWA（本次新增）
+手機固定底部四個入口：首頁、交易明細、銀行 PDF 匯入、設定；手機卡片與桌面完整表格共用解析與核對邏輯。已加入你提供的藍色錢包 App 圖示、Apple Touch Icon、Manifest、獨立 scope 的 Service Worker。
+只快取固定清單的公開程式、圖示和 PDF.js 靜態資源；不快取 PDF、密碼、OAuth Token 或交易，離線重開不恢復敏感預覽。更新須關閉所有 App 視窗，不會在解析中強制替換程式。
+設定頁含 iPhone 加入主畫面指引。目標支援 Windows Chrome、iPhone Safari、iPhone 主畫面 PWA、Android Chrome；實際完成的是 Windows Chrome 與手機觸控視窗模擬，不能宣稱 iPhone／Android 實機已通過。
+Google OAuth 尚未啟用；待兩家銀行 PDF 真實樣本驗收完成後，再實作並優先驗證 Safari 與主畫面登入。iOS 捷徑只列研究，不預設支援直接分享到 PWA。完整架構、資料排除規則與實機測試表見 docs/PWA.md。
