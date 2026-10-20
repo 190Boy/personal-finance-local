@@ -1,3 +1,4 @@
+import {GOOGLE_CLIENT_ID} from './config.mjs';
 import {GoogleStore,SCOPE} from './google.mjs';
 import {makeImport} from './records.mjs';
 const $=id=>document.getElementById(id),store=new GoogleStore();
@@ -9,7 +10,7 @@ function gis(){
  if(!gisPromise)gisPromise=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=resolve;script.onerror=()=>{gisPromise=null;script.remove();reject(Error('GOOGLE_NETWORK'));};document.head.append(script);});
  return gisPromise;
 }
-function controls(){for(const id of ['connectGoogle','disconnectGoogle','refreshCloud','syncCloud','googleClientId'])$(id).disabled=working;}
+function controls(){for(const id of ['connectGoogle','disconnectGoogle','refreshCloud','syncCloud'])$(id).disabled=working;}
 function clearSummary(){
  $('bankDeposit').textContent='尚未同步';$('bankDepositDetail').textContent='連接 Google 後載入各帳戶最後餘額。';$('cloudSheetLink').hidden=true;
 }
@@ -20,7 +21,8 @@ async function summary(){
  $('cloudSheetLink').href=store.file.webViewLink||'https://docs.google.com/spreadsheets/d/'+encodeURIComponent(store.file.id)+'/edit';$('cloudSheetLink').hidden=false;
 }
 export function initCloud({getPayload}){
- try{$('googleClientId').value=localStorage.getItem('finance-google-client-id')||'';}catch{}
+ // Remove the obsolete per-user public ID setting; credentials remain memory-only.
+ try{localStorage.removeItem('finance-google-client-id');}catch{}
  clearSummary();
  async function save(){
   if(working)return;const payload=getPayload();if(!payload){notice(messages.NO_RECORDS);return;}
@@ -35,12 +37,11 @@ export function initCloud({getPayload}){
   finally{working=false;controls();}
  }
  $('syncCloud').addEventListener('click',save);
- $('googleClientId').addEventListener('change',()=>{store.disconnect();clearSummary();try{localStorage.setItem('finance-google-client-id',$('googleClientId').value.trim());}catch{}notice('用戶端 ID 已更新，請重新連接 Google。');});
  // Load GIS on settings entry so the subsequent Connect click can open its popup synchronously.
- const prepare=()=>{if(location.hash==='#settings'&&$('googleClientId').value.trim())void gis().catch(()=>notice(messages.GOOGLE_NETWORK));};
- window.addEventListener('hashchange',prepare);$('googleClientId').addEventListener('change',prepare);prepare();
+ const prepare=()=>{if(location.hash==='#settings'&&GOOGLE_CLIENT_ID)void gis().catch(()=>notice(messages.GOOGLE_NETWORK));};
+ window.addEventListener('hashchange',prepare);prepare();
  $('connectGoogle').addEventListener('click',()=>{
-  const id=$('googleClientId').value.trim();if(!/^[\w-]+\.apps\.googleusercontent\.com$/.test(id)){notice('請先填入有效的 Google OAuth 網頁用戶端 ID；下方有設定說明。');return;}
+  const id=GOOGLE_CLIENT_ID;if(!/^[\w-]+\.apps\.googleusercontent\.com$/.test(id)){notice('網站尚未設定 Google 連接，請聯絡網站管理者。');return;}
   if(!globalThis.google?.accounts?.oauth2){void gis().then(()=>notice('Google 授權元件已就緒，請再點一次「連接 Google」。')).catch(()=>notice(messages.GOOGLE_NETWORK));return;}
   working=true;controls();
   const finish=()=>{working=false;controls();};
@@ -48,7 +49,7 @@ export function initCloud({getPayload}){
    callback:async response=>{
     try{
      if(response.error||!response.access_token||!google.accounts.oauth2.hasGrantedAllScopes(response,SCOPE))throw Error('GOOGLE_PERMISSION');
-     store.authorize(response.access_token,response.expires_in);clearSummary();await store.open();await summary();notice('Google 已連接。匯入後可自動寫入「我的理財紀錄」。');
+     store.authorize(response.access_token,response.expires_in);clearSummary();await store.open();await summary();notice('Google 已連接。匯入後會依自動儲存選項寫入你自己的「我的理財紀錄」。');
     }catch(error){store.disconnect();clearSummary();notice(messages[error.message]||'Google 連接失敗。');}finally{finish();}
    },error_callback:()=>{finish();notice('Google 授權視窗未完成，請確認 Safari 允許彈出視窗後再連接。');}});
   try{client.requestAccessToken({prompt:'select_account'});}catch{finish();notice('無法開啟 Google 授權視窗，請在 Safari 開啟網站再試。');}

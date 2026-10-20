@@ -1,3 +1,7 @@
+# v0.5.1：網站共用 Google OAuth Client ID
+
+OAuth Client ID 已由網站統一設定於 cloud/config.mjs。一般用戶只需點「連接 Google」，選擇自己的帳號並授權；每位用戶的檔案仍由其自己的 Token 存取與建立。已移除個別 Client ID 輸入欄及其 localStorage 設定，啟動時清除舊設定。Repo 僅包含公開 Client ID，不包含 Client Secret。網站管理者負責一次性啟用 API、設定 OAuth origin／測試名單及發布狀態。以下 v0.5.0 的個別 Client ID 設定步驟以本節為準。
+
 # v0.5.0：Google 試算表交易紀錄與銀行存款合計
 
 Google 設定與資料說明見 web/google-setup.html。需由網站擁有者建立 Web OAuth Client ID、啟用 Drive API／Sheets API，再在設定頁連接；沒有 Client ID 時，本機解析仍可使用。使用 Google Identity Services Token 模式，僅請求 drive.file；本工具建立的試算表由使用者自己的 Google 帳戶持有，不會分享。

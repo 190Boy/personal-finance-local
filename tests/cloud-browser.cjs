@@ -7,7 +7,7 @@ const ROOT=path.resolve(__dirname,'..'),BASE=process.env.FINANCE_TEST_URL||'http
  const page=await browser.newPage({serviceWorkers:'block'}),sheets=[],rows={},errors=[];let appendCount=0;
  page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/pdf-parser/extract.mjs',r=>r.fulfill({contentType:'text/javascript',body:'export const PDFJS_VERSION="test";'}));
- await page.route('https://accounts.google.com/gsi/client',r=>r.fulfill({contentType:'text/javascript',body:`window.google={accounts:{oauth2:{hasGrantedAllScopes:()=>true,initTokenClient:o=>({requestAccessToken:()=>o.callback({access_token:'synthetic-token',expires_in:3600,scope:'https://www.googleapis.com/auth/drive.file'})})}}};`}));
+ await page.route('https://accounts.google.com/gsi/client',r=>r.fulfill({contentType:'text/javascript',body:`window.google={accounts:{oauth2:{hasGrantedAllScopes:()=>true,initTokenClient:o=>(window.testClientId=o.client_id,{requestAccessToken:()=>o.callback({access_token:'synthetic-token',expires_in:3600,scope:'https://www.googleapis.com/auth/drive.file'})})}}};`}));
  await page.route('https://www.googleapis.com/**',async route=>{
   const req=route.request();assert.ok(!(req.postData()||'').includes('synthetic-only'));
   const body=req.method()==='POST'?{id:'test-sheet',name:'我的理財紀錄',webViewLink:'https://docs.google.com/spreadsheets/d/test-sheet/edit'}:{files:[]};
@@ -31,7 +31,7 @@ const ROOT=path.resolve(__dirname,'..'),BASE=process.env.FINANCE_TEST_URL||'http
   await route.fulfill({headers:{'access-control-allow-origin':'*','access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,PUT,OPTIONS'},contentType:'application/json',body:JSON.stringify(output)});
  });
  await page.goto(BASE+'/web/#settings');await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('工具已就緒'));
- await page.fill('#googleClientId','synthetic-test.apps.googleusercontent.com');await page.locator('#googleClientId').blur();
+ assert.equal(await page.locator('#googleClientId').count(),0);
  await page.waitForFunction(()=>!!window.google?.accounts);await page.click('#connectGoogle');
  await page.waitForFunction(()=>document.querySelector('#cloudStatus').textContent.startsWith('Google 已連接'),null,{timeout:7000}).catch(async e=>{console.log('Cloud status:',await page.textContent('#cloudStatus'));throw e;});
  await page.evaluate(()=>location.hash='import');await page.selectOption('#bank','esun');await page.fill('#account','測試帳戶');
@@ -43,8 +43,8 @@ const ROOT=path.resolve(__dirname,'..'),BASE=process.env.FINANCE_TEST_URL||'http
  assert.equal(appendCount,2);
  await page.evaluate(()=>location.hash='home');assert.ok((await page.textContent('#bankDeposit')).includes('90.00'));
  await page.evaluate(()=>location.hash='settings');await page.click('#disconnectGoogle');assert.equal(await page.textContent('#bankDeposit'),'尚未同步');
- const stored=await page.evaluate(()=>Object.keys(localStorage));assert.deepEqual(stored,['finance-google-client-id']);assert.deepEqual(errors,[]);
+ const stored=await page.evaluate(()=>Object.keys(localStorage));assert.deepEqual(stored,[]);assert.equal(await page.evaluate(()=>window.testClientId),'568410548395-j0o7udch6i3q3g2qsg4ob2k2n3mtkrib.apps.googleusercontent.com');assert.deepEqual(errors,[]);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
- console.log('PASS: mocked OAuth/Drive/Sheets, auto-save from encrypted import, category tab, ledger, repeated save, homepage balance, disconnect, public-ID-only storage and mobile width.');
+ console.log('PASS: mocked OAuth/Drive/Sheets, auto-save from encrypted import, category tab, ledger, repeated save, homepage balance, disconnect, no credential storage and shared Client ID and mobile width.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e.stack);process.exit(1);});
