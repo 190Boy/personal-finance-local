@@ -1,3 +1,9 @@
+# Safari 圖示快取排查
+
+HTML 改用 apple-touch-icon-v2.png（與原圖相同的 180×180 PNG），讓 Safari 使用新的圖示網址；根目錄與 web/ 入口均宣告，Service Worker 固定清單及快取版本同步更新。原圖保留以相容舊頁面。本次不改圖片設計，不代表 iPhone 實機已通過。
+
+部署完成後關閉所有本站 Safari／PWA 視窗，重新開啟 web/，刪除舊捷徑再加入主畫面。若仍顯示文字替代圖示，需繼續以 iPhone 實機排查。
+
 # v0.4.0 同步註記
 沿用使用者在 GitHub 更新的圖示；Apple Touch Icon 目前檔名為 apple-touch-icon.png。以下為舊版產製歷史，重跑 build-icons 前應先備份自訂圖示。
 
