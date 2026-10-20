@@ -1,3 +1,4 @@
+import {initCloud} from '../cloud/ui.mjs';
 import {inspectTable,parseEsunTable,TABLE_FIELDS} from '../pdf-parser/tabular.mjs';
 import {readLocalExcel} from '../pdf-parser/excel.mjs';
 import {applyExtractionWarnings} from '../pdf-parser/geometry.mjs';
@@ -24,7 +25,7 @@ const reasonNames={
  ORPHAN_FINANCIAL_ROW:'有金額但缺日期',BANK_MISMATCH:'銀行選擇與文件標記不一致',NO_TRANSACTIONS:'未識別交易',ORDER_MISMATCH:'交易順序不符'
 };
 let extractor=null,result=null,pages=null,busy=false,run=0,controller=null;
-let tableDraft=null,excelBook=null;
+let tableDraft=null,excelBook=null,importContext=null;
 const seenFiles=new Set(),seenTransactions=new Set(),urls=new Set();
 
 const routes=['home','transactions','import','settings'];
@@ -60,7 +61,7 @@ function setBusy(value){
  exportsEnabled();
 }
 function discardPreview(){
- result=null;if(pages){pages.length=0;pages=null;}
+ result=null;importContext=null;if(pages){pages.length=0;pages=null;}
  $('rows').replaceChildren();$('mobileRows').replaceChildren();$('homePreview').textContent='尚無本次預覽資料。';$('emptyTransactions').hidden=false;$('issues').textContent='';$('rawText').textContent='';
  $('resultSummary').textContent='';$('validation').textContent='';$('resultPanel').hidden=true;
  $('confirmExport').checked=false;exportsEnabled();
@@ -169,7 +170,9 @@ $('pdfForm').addEventListener('submit',async event=>{
   }
   markCrossFileDuplicates(result,seenTransactions,$('account').value.trim());
   seenFiles.add(documentHash);
+  importContext={fileHash:documentHash,order:options.order};
   render();location.hash='transactions';updateRoute();status(result.transactions.length?'解析完成，請逐筆比對銀行原始檔案。':'檔案讀取完成，但未識別交易；請檢查銀行選擇及欄位位置。');
+  await cloud.savedImport();
  }catch(error){
   if(myRun===run){discardPreview();status(errorMessages[error.message]||'本機解析失敗。請檢查版本與檔案格式；未上傳檔案。');}
  }finally{
@@ -265,4 +268,5 @@ function updateSource(){
 }
 $('bank').addEventListener('change',()=>{clearAll();updateSource();$('order').value=$('bank').value==='esun'?'descending':'ascending';status($('bank').value==='esun'?'請選玉山銀行匯出的 Excel，再確認欄位。':'請選中信 PDF，最後輸入密碼。');});
 $('excelSheet').addEventListener('change',selectExcelSheet);$('excelHeader').addEventListener('change',fillExcelMapping);
+const cloud=initCloud({getPayload:()=>result&&importContext?{result,context:importContext,account:$('account').value.trim()}:null});
 updateSource();void start();

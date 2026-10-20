@@ -2,8 +2,8 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'">
-<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://accounts.google.com/gsi/client; worker-src 'self'; connect-src 'self' https://accounts.google.com/gsi/ https://www.googleapis.com https://sheets.googleapis.com; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data:; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; frame-src https://accounts.google.com/gsi/">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#123c72">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,15 +16,16 @@
 <link rel="stylesheet" href="./style.css">
 <script type="module" src="./app.mjs"></script>
 </head>
-<body><a class="skip" href="#main">跳至主要內容</a><header class="brandbar"><div class="wrap brand"><img src="./icons/icon-192.png" alt="" width="46" height="46"><div><strong>我的理財</strong><small>本機優先 · 銀行資料匯入測試</small></div><span class="version">v0.4.2</span></div></header><nav class="bottomnav" aria-label="主要導覽"><a href="#home" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/></svg><span>首頁</span></a><a href="#transactions" data-nav="transactions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v17H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>交易明細</span></a><a href="#import" data-nav="import"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4M12 18v-7m-3 3 3-3 3 3"/></svg><span>銀行匯入</span></a><a href="#settings" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3 6 0 1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z"/></svg><span>設定</span></a></nav><main id="main" class="wrap"><section id="view-home" data-route="home">
-<div class="hero"><p class="eyebrow">LOCAL FIRST · PRIVATE BY DESIGN</p><h1>把理財主導權，<br>留在自己手上。</h1><p>玉山讀取 Excel、中信解密 PDF；資料留在裝置，先預覽、核對，再決定匯出。</p><a class="button" href="#import">開始測試銀行匯入</a></div>
+<body><a class="skip" href="#main">跳至主要內容</a><header class="brandbar"><div class="wrap brand"><img src="./icons/icon-192.png" alt="" width="46" height="46"><div><strong>我的理財</strong><small>本機優先 · 銀行資料匯入測試</small></div><span class="version">v0.5.0</span></div></header><nav class="bottomnav" aria-label="主要導覽"><a href="#home" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/></svg><span>首頁</span></a><a href="#transactions" data-nav="transactions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v17H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>交易明細</span></a><a href="#import" data-nav="import"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4M12 18v-7m-3 3 3-3 3 3"/></svg><span>銀行匯入</span></a><a href="#settings" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3 6 0 1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z"/></svg><span>設定</span></a></nav><main id="main" class="wrap"><section id="view-home" data-route="home">
+<div class="hero"><p class="eyebrow">LOCAL FIRST · PRIVATE BY DESIGN</p><h1>把理財主導權，<br>留在自己手上。</h1><p>玉山讀取 Excel、中信解密 PDF；在本機解析，交易可記錄到自己的 Google 試算表。</p><a class="button" href="#import">開始測試銀行匯入</a></div>
 <div class="summarygrid" aria-label="資產來源狀態">
-<div class="stat"><small>銀行存款</small><strong>尚未同步</strong></div><div class="stat"><small>股票資產</small><strong>尚未同步</strong></div>
+<div class="stat"><small>銀行存款</small><strong id="bankDeposit">尚未同步</strong></div><div class="stat"><small>股票資產</small><strong>尚未同步</strong></div>
 <div class="stat"><small>信用卡負債</small><strong>尚未同步</strong></div><div class="stat"><small>淨資產</small><strong>尚未計算</strong></div>
 </div>
+<section class="panel"><h2>銀行存款來源</h2><p id="bankDepositDetail"></p><a id="cloudSheetLink" target="_blank" rel="noopener noreferrer" hidden>開啟我的雲端試算表</a></section>
 <section class="panel"><h2>先讓每一筆資料正確</h2><p id="homePreview">尚無本次預覽資料。</p><p class="muted">這些狀態不代表你的實際資產為零。此版不連線銀行、不寫入帳務，也不將舊資料標示為即時餘額。</p>
 <ol class="steps"><li>玉山選 Excel；中信選 PDF 後輸入密碼。</li><li>確認日期、時間、摘要、支出、收入與餘額。</li><li>比對原檔後，自行匯出核對用 CSV／JSON。</li></ol></section>
-<section class="panel"><h2>你的主畫面理財工具</h2><p>手機可加入主畫面，桌面也能使用同一套功能與解析邏輯。離線功能只保存公開程式，交易預覽只留在本次頁面。</p><a href="#settings">查看安裝與隱私設定</a></section>
+<section class="panel"><h2>你的主畫面理財工具</h2><p>手機可加入主畫面，桌面也能使用同一套功能與解析邏輯。離線保存公開程式；重新連接 Google 後可載入雲端餘額。</p><a href="#settings">查看安裝與隱私設定</a></section>
 </section><section id="view-import" data-route="import" class="panel" hidden>
 <div class="sectionhead"><h2>銀行資料匯入</h2><span class="pill">實驗版／待真實樣本驗收</span></div>
 <p class="muted">這是解析測試工具，沒有入帳功能。銀行格式、字型或跨頁方式不同時，可能需要調整欄位位置。</p>
@@ -35,7 +36,7 @@
 <label id="passwordField"><span id="passwordLabel">PDF 開啟密碼</span><input id="password" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="僅供本次記憶體內解密"></label>
 <label>原始交易順序<select id="order"><option value="ascending">由舊到新</option><option value="descending">由新到舊</option></select></label>
 <label>最早交易之前的餘額（選填）<input id="opening" inputmode="decimal" placeholder="例如 10000.00；不是第一筆交易後餘額"></label>
-<label>本次核對帳戶代碼（選填）<input id="account" maxlength="60" autocomplete="off" placeholder="自行取名；只在本次頁面記憶體使用"></label>
+<label>帳戶代稱（雲端記錄必填）<input id="account" maxlength="60" autocomplete="off" placeholder="例如玉山主要帳戶；同一帳戶每次填相同名稱"></label>
 </div>
 <p class="muted">檔案上限 25 MiB；中信 PDF 上限 200 頁、90 秒；玉山 Excel 上限 50,000 筆記錄。沒有期初餘額時，最早一筆會標示「無起始餘額」，不能算完整餘額核對通過。</p>
 <details id="pdfColumns"><summary>欄位位置設定（自動定位失敗時使用）</summary>
@@ -61,9 +62,10 @@
 <div class="tablewrap" tabindex="0" role="region" aria-label="交易預覽，可水平捲動">
 <table><thead><tr><th>日期</th><th>時間</th><th>摘要</th><th>支出</th><th>收入</th><th>手續費</th><th>餘額</th><th>辨識提示</th><th>來源位置</th><th>餘額檢查</th><th>待核對原因</th></tr></thead><tbody id="rows"></tbody></table>
 </div>
+<section class="panel"><h3>雲端記錄</h3><p>交易會寫入你 Google Drive 的「我的理財紀錄」→「銀行存款」，保留銀行及帳戶欄位。</p><button id="syncCloud" type="button">儲存本次匯入</button><p id="syncNotice" role="status" aria-live="polite"></p></section>
 <details><summary>錯誤報告</summary><pre id="issues"></pre></details>
 <details id="textDetails"><summary>本機擷取文字與座標（可能包含個資，請勿公開）</summary><pre id="rawText"></pre></details>
-<p class="muted">自動分類僅提示：轉帳、卡費、投資等不能直接當成生活支出。重複候選會保留，不自動刪除；跨來源去重尚未完成。同一檔案再次處理會提示重複，紀錄僅存於此頁記憶體。</p>
+<p class="muted">自動分類僅提示：轉帳、卡費、投資等不能直接當成生活支出。重複候選會保留，不自動刪除；雲端儲存會另外比對交易指紋。同一檔案再次處理會提示重複，紀錄僅存於此頁記憶體。</p>
 <label class="inline"><input id="confirmExport" type="checkbox">我了解匯出內容可能有錯，且包含財務資料；匯出僅供人工核對。</label>
 <div class="actions"><button id="csv" disabled>匯出預覽 CSV</button><button id="json" class="secondary" disabled>匯出預覽 JSON</button></div>
 </section>
@@ -74,13 +76,20 @@
 <p class="installnote"><strong>iPhone Safari：</strong>開啟 HTTPS 網站，點分享選單，再選「加入主畫面」。選項名稱依 iOS 版本可能不同；本頁不會假裝顯示 iOS 原生安裝提示。</p>
 <p class="installnote"><strong>Android／Windows Chrome：</strong>可使用瀏覽器的安裝選項；瀏覽器提供安裝提示時，也會顯示上方按鈕。</p>
 <p class="muted">第一次準備離線資源需要連線。系統可能回收網站儲存空間，因此離線可用性仍須在你的裝置驗證。</p></section>
-<section class="panel"><h2>Google 帳戶與同步</h2><button type="button" disabled>Google 登入尚未啟用</button><p class="muted">先完成玉山 Excel／中信 PDF 的實際欄位與餘額驗收，再加入 Google OAuth 與各使用者自己的 Drive／Sheets。此版本沒有登入或 Token，iPhone Safari 與主畫面登入流程尚未測試。</p></section>
+<section class="panel"><h2>Google 帳戶與同步</h2>
+<p>連接後，自動建立或開啟你 Drive 裡的「我的理財紀錄」。銀行存款共用一頁，以銀行、帳戶代稱區分；另有匯入紀錄頁。</p>
+<label>Google OAuth 用戶端 ID<input id="googleClientId" autocomplete="off" spellcheck="false" placeholder="…apps.googleusercontent.com"></label>
+<div class="actions"><button id="connectGoogle" type="button">連接 Google</button><button id="disconnectGoogle" type="button" class="secondary">中斷本次連接</button><button id="refreshCloud" type="button" class="secondary">重新載入雲端餘額</button></div>
+<label class="inline"><input id="autoCloud" type="checkbox" checked>連接後，每次解析完成自動儲存交易至我的試算表</label>
+<p id="cloudStatus" role="status" aria-live="polite">尚未連接 Google。尚無用戶端 ID 時，請先閱讀設定步驟。</p>
+<p><a href="./google-setup.html" target="_blank" rel="noopener noreferrer">Google 連接設定步驟與資料說明</a></p>
+<p class="muted">公開用戶端 ID 可記在此瀏覽器；授權 Token 與交易不寫入本機儲存。重新開啟網站或授權過期時需重新連接。中斷連接不會刪除雲端試算表。</p></section>
 <section class="panel"><h2>本機資料管理</h2><div class="actions"><button id="clearData" type="button">清除本次檔案與交易預覽</button><button id="clearCache" class="secondary" type="button">清除公開程式快取</button></div><p id="settingsNotice" role="status"></p><p class="muted">公開程式快取只包含應用程式、圖示、PDF.js 與字型。清除快取不會替你刪除已匯出的下載檔。</p></section>
 <section class="panel">
 <h2>資料與隱私</h2>
-<p>PDF.js、Worker、中文字碼表與字型檔均由本專案提供。頁面不載入分析、追蹤或第三方腳本；PDF 以本機位元組傳入，不提供上傳或雲端備援。網路只允許取得同站靜態程式資源。</p>
+<p>PDF.js、Excel 解密與解析在本機執行。設定 Google 連接時會載入 Google 官方授權元件；連接後，啟用自動儲存或點擊儲存會將解析後的交易、摘要、帳戶代稱、來源指紋及待核對原因送至你的 Google 試算表。原始銀行檔案與開啟密碼不隨交易上傳。</p>
 <p>密碼送出後立即清空；每次完成會銷毀 PDF.js 工作與 Worker。預覽保留至你清除或離開頁面，匯出檔由你自行保管。我們只能釋放程式持有的參照，無法保證瀏覽器、作業系統或受入侵裝置的所有記憶體殘留都被清除。</p>
-<p class="muted">Windows Chrome 自動測試與 iPhone Safari 實機測試分別記錄，不能用手機畫面模擬替代 iPhone 實機驗收。開發者工具的 Network 可檢查載入與解析期間沒有 PDF／密碼請求。</p>
+<p class="muted">Windows Chrome 自動測試與 iPhone Safari 實機測試分別記錄，不能用手機畫面模擬替代 iPhone 實機驗收。開發者工具的 Network 可檢查原始檔與開啟密碼沒有送出；Google 同步會送出交易紀錄。</p>
 <p id="runtime" class="muted"></p>
 </section>
-<section class="panel"><h2>iOS 捷徑（後續研究）</h2><p>目前請先將銀行 PDF 存入「檔案」，再回到本工具選檔。本版沒有 Share Target 或背景接收檔案功能；不預設 iOS 分享選單能直接把 PDF 交給 PWA。</p></section></section></main><footer class="wrap">銀行 Excel、PDF 與密碼不離開你的裝置。實驗解析結果仍需人工核對。</footer></body></html>
+<section class="panel"><h2>iOS 捷徑（後續研究）</h2><p>目前請先將銀行 PDF 存入「檔案」，再回到本工具選檔。本版沒有 Share Target 或背景接收檔案功能；不預設 iOS 分享選單能直接把 PDF 交給 PWA。</p></section></section></main><footer class="wrap">銀行原始檔與密碼在本機處理；啟用 Google 同步後，交易紀錄儲存到你的 Drive。</footer></body></html>
