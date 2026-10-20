@@ -1,3 +1,8 @@
+# v0.3.2 圖示透明背景修正
+一般 icon-32／180／192／512 PNG 保留原始透明邊角，不再填入淺色底。Apple Touch Icon 改用獨立 apple-touch-icon-180.png；Apple 與 maskable 圖示採藍色實底，避免系統合成透明區產生白邊。此修正不代表 iPhone 主畫面圖示辨識問題已實機驗證。
+
+更新 web/icons/ 的六個輸出圖、web/index.html 與根目錄 sw.js；README 與 docs/ICONS.md 記錄交接。關閉全部網站與 PWA 視窗後重開；仍見舊版時在設定清除公開程式快取再重開，確認 v0.3.2。已安裝主畫面圖示可能需移除後重新加入。
+
 # 0.3.1 旋轉文字判斷修正
 原版以字型矩陣 transform[1]／transform[2] 的絕對值判斷，會把部分斜體／剪切字型誤當成旋轉；此外任何一段直排文字都會讓整份文件中止。
 

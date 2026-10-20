@@ -1,0 +1,32 @@
+[
+  {
+    "file": "icon-32.png",
+    "size": 32,
+    "transparent": true
+  },
+  {
+    "file": "icon-180.png",
+    "size": 180,
+    "transparent": true
+  },
+  {
+    "file": "icon-192.png",
+    "size": 192,
+    "transparent": true
+  },
+  {
+    "file": "icon-512.png",
+    "size": 512,
+    "transparent": true
+  },
+  {
+    "file": "apple-touch-icon-180.png",
+    "size": 180,
+    "background": "#0756a4"
+  },
+  {
+    "file": "icon-maskable-512.png",
+    "size": 512,
+    "background": "#0756a4"
+  }
+]
