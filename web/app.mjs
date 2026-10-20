@@ -70,6 +70,7 @@ function clearAll(){
  run++;controller?.abort();controller=null;
  discardPreview();tableDraft=null;excelBook=null;$('excelSheet').replaceChildren();$('excelMapping').replaceChildren();$('excelHeader').replaceChildren();$('excelInfo').textContent='';seenFiles.clear();seenTransactions.clear();
  for(const id of sensitiveInputs)$(id).value='';
+ window.dispatchEvent(new Event('account-source-reset'));
  for(const url of urls)URL.revokeObjectURL(url);urls.clear();
  setBusy(false);status('已清除頁面持有的資料與本次重複檢查紀錄。');
 }

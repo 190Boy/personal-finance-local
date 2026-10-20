@@ -1,9 +1,10 @@
+import {initAccounts} from './accounts.mjs';
 import {GOOGLE_CLIENT_ID} from './config.mjs';
 import {GoogleStore,SCOPE} from './google.mjs';
 import {makeImport} from './records.mjs';
 const $=id=>document.getElementById(id),store=new GoogleStore();
 const messages={ACCOUNT_REQUIRED:'請先填寫帳戶代稱，例如「玉山主要帳戶」；同一帳戶每次使用相同名稱。',NO_RECORDS:'尚無本次交易可儲存。',GOOGLE_LOGIN_REQUIRED:'請到設定重新連接 Google；授權可能已過期。',GOOGLE_NETWORK:'連線中斷，請重試；重試前會檢查匯入紀錄，避免同檔重複寫入。',GOOGLE_PERMISSION:'Google 權限不足，請確認已啟用 Drive API、Sheets API，並同意檔案權限。',GOOGLE_API:'Google 未完成操作。請確認 API 設定，稍後重試。',SHEET_SCHEMA:'試算表欄位與目前版本不同，請保留系統欄名及順序。',MULTIPLE_SPREADSHEETS:'找到多份「我的理財紀錄」，請在 Drive 整理重複的應用程式試算表後重連。',CLOUD_ROW_LIMIT:'雲端資料超過目前 100,000 列讀取上限。',SYNC_BUSY:'正在儲存，請稍候。'};
-let gisPromise=null,working=false,expiryTimer=null;
+let gisPromise=null,working=false,expiryTimer=null,accountChoices=null;
 function notice(text){$('cloudStatus').textContent=text;$('syncNotice').textContent=text;}
 function gis(){
  if(globalThis.google?.accounts?.oauth2)return Promise.resolve();
@@ -33,15 +34,18 @@ function showAccount(){
  clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>logout('Google 授權已過期，請重新連接。'),Math.max(0,store.expires-Date.now()));
 }
 function clearSummary(){
+ accountChoices?.clear();
  $('bankDeposit').textContent='尚未同步';$('bankDepositDetail').textContent='連接 Google 後載入各帳戶最後餘額。';$('cloudSheetLink').hidden=true;
 }
 async function summary(){
  const result=await store.summary();
+ accountChoices?.update(result.accounts||{});
  $('bankDeposit').textContent=result.balances.length?(result.pending.length?'部分合計 NT$ ':'NT$ ')+(result.totalCents/100).toLocaleString('zh-TW',{minimumFractionDigits:2,maximumFractionDigits:2}):'尚無可核對餘額';
  $('bankDepositDetail').textContent=(result.balances.length?result.balances.map(b=>b.bank+'／'+b.account+'：'+(b.cents/100).toLocaleString('zh-TW')+'（'+b.date+'）').join('；'):'尚無已儲存的銀行明細。')+(result.pending.length?'；'+result.pending.length+' 個帳戶餘額或交易先後待確認，未列入合計。':'')+' 此為匯入明細最後餘額，非銀行即時餘額。';
  $('cloudSheetLink').href=store.file.webViewLink||'https://docs.google.com/spreadsheets/d/'+encodeURIComponent(store.file.id)+'/edit';$('cloudSheetLink').hidden=false;
 }
 export function initCloud({getPayload}){
+ accountChoices=initAccounts();
  // Remove the obsolete per-user public ID setting; credentials remain memory-only.
  try{localStorage.removeItem('finance-google-client-id');}catch{}
  clearSummary();controls();

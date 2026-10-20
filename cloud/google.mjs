@@ -1,3 +1,4 @@
+import {savedAccounts} from './accounts.mjs';
 import {HEADERS,IMPORT_HEADERS,BANK_TABS,bankSummary} from './records.mjs';
 export const SCOPE='https://www.googleapis.com/auth/drive.file';
 const APP='personal-finance-local-v1',DRIVE='https://www.googleapis.com/drive/v3',SHEETS='https://sheets.googleapis.com/v4/spreadsheets';
@@ -39,7 +40,7 @@ export class GoogleStore{
   const data=await this.api(SHEETS+'/'+this.file.id+'/values/'+encodeURIComponent("'"+tab+"'!A:S")+'?valueRenderOption=UNFORMATTED_VALUE');
   const rows=data.values||[];if(rows.length>100001)throw Error('CLOUD_ROW_LIMIT');return rows;
  }
- async summary(){let rows=[];for(const tab of BANK_TABS){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(HEADERS))throw Error('SHEET_SCHEMA');rows.push(...values.slice(1));}return bankSummary(rows);}
+ async summary(){let rows=[];for(const tab of BANK_TABS){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(HEADERS))throw Error('SHEET_SCHEMA');rows.push(...values.slice(1));}return {...bankSummary(rows),accounts:savedAccounts(rows)};}
  async save(batch){
   if(this.saving)throw Error('SYNC_BUSY');this.saving=true;const epoch=this.epoch,fileId=this.file?.id;
   try{

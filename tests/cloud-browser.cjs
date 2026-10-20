@@ -43,6 +43,8 @@ const ROOT=path.resolve(__dirname,'..'),BASE=process.env.FINANCE_TEST_URL||'http
  assert.equal(rows['銀行存款'].length,2);assert.equal(rows['匯入紀錄'].length,2);assert.equal(rows['銀行存款'][1][1],'玉山銀行');
  await page.click('#syncCloud');await page.waitForFunction(()=>document.querySelector('#syncNotice').textContent.includes('已記錄'));
  assert.equal(appendCount,2);
+ assert.equal(await page.inputValue('#syncAccountSelect'),'測試帳戶');assert.equal(await page.inputValue('#existingAccount'),'測試帳戶');await page.fill('#syncAccount','新的測試帳戶');assert.equal(await page.inputValue('#account'),'新的測試帳戶');await page.selectOption('#syncAccountSelect','測試帳戶');assert.equal(await page.inputValue('#account'),'測試帳戶');
+ await page.evaluate(()=>location.hash='import');await page.selectOption('#bank','ctbc');assert.equal(await page.inputValue('#account'),'');await page.selectOption('#bank','esun');assert.equal(await page.inputValue('#account'),'測試帳戶');
  await page.evaluate(()=>location.hash='home');assert.ok((await page.textContent('#bankDeposit')).includes('90.00'));
  await page.evaluate(()=>location.hash='settings');await page.click('#connectGoogle');assert.equal(await page.textContent('#connectGoogle'),'連接 Google');assert.equal(await page.locator('#googleAccount').isVisible(),false);assert.equal(await page.textContent('#googleAccountEmail'),'');assert.equal(await page.getAttribute('#googleAvatar','src'),null);assert.equal(await page.textContent('#bankDeposit'),'尚未同步');
  const stored=await page.evaluate(()=>Object.keys(localStorage));assert.deepEqual(stored,[]);assert.equal(await page.evaluate(()=>window.testClientId),'568410548395-j0o7udch6i3q3g2qsg4ob2k2n3mtkrib.apps.googleusercontent.com');assert.deepEqual(errors,[]);
