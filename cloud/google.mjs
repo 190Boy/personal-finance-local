@@ -4,9 +4,9 @@ const APP='personal-finance-local-v1',DRIVE='https://www.googleapis.com/drive/v3
 const literal=value=>typeof value==='number'?{numberValue:value}:{stringValue:String(value??'')};
 const cells=rows=>rows.map(row=>({values:row.map(value=>({userEnteredValue:literal(value)}))}));
 export class GoogleStore{
- constructor({fetcher=(...args)=>globalThis.fetch(...args)}={}){this.fetcher=fetcher;this.token='';this.expires=0;this.file=null;this.sheets=[];this.saving=false;this.epoch=0;}
+ constructor({fetcher=(...args)=>globalThis.fetch(...args)}={}){this.fetcher=fetcher;this.token='';this.expires=0;this.file=null;this.sheets=[];this.user=null;this.saving=false;this.epoch=0;}
  authorize(token,expires){this.disconnect();this.token=token;this.expires=Date.now()+Math.max(0,Number(expires)-30)*1000;}
- disconnect(){this.epoch++;this.token='';this.expires=0;this.file=null;this.sheets=[];}
+ disconnect(){this.epoch++;this.token='';this.expires=0;this.file=null;this.sheets=[];this.user=null;}
  get connected(){return !!this.token&&Date.now()<this.expires;}
  async api(url,{method='GET',body}={}){
   if(!this.connected)throw Error('GOOGLE_LOGIN_REQUIRED');const epoch=this.epoch;
@@ -17,6 +17,7 @@ export class GoogleStore{
   if(!response.ok)throw Error(response.status===403?'GOOGLE_PERMISSION':'GOOGLE_API');
   return response.status===204?{}:response.json();
  }
+ async profile(){const data=await this.api(DRIVE+'/about?fields=user(displayName,emailAddress,photoLink)');this.user=data.user||{};return this.user;}
  async open(){
   const query="trashed = false and mimeType = 'application/vnd.google-apps.spreadsheet' and appProperties has { key='financeApp' and value='"+APP+"' }";
   const found=await this.api(DRIVE+'/files?'+new URLSearchParams({q:query,fields:'files(id,name,webViewLink),nextPageToken',pageSize:'100'}));

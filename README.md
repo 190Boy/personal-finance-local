@@ -1,3 +1,7 @@
+# v0.5.2：Google 帳戶資訊與登出
+
+連接後顯示 Google 帳戶名稱、信箱與頭像，主按鈕切換為「登出」。使用既有 drive.file 授權呼叫 Drive about.get，沒有增加 OAuth scopes。帳戶資料僅存本次記憶體，登出、離開或授權到期時清除。頭像只允許 Google googleusercontent.com HTTPS 來源；沒有頭像或載入失敗時顯示姓名首字。登出只清除此工具的授權，不登出整個 Google 帳戶，也不刪除雲端資料。
+
 # v0.5.1：網站共用 Google OAuth Client ID
 
 OAuth Client ID 已由網站統一設定於 cloud/config.mjs。一般用戶只需點「連接 Google」，選擇自己的帳號並授權；每位用戶的檔案仍由其自己的 Token 存取與建立。已移除個別 Client ID 輸入欄及其 localStorage 設定，啟動時清除舊設定。Repo 僅包含公開 Client ID，不包含 Client Secret。網站管理者負責一次性啟用 API、設定 OAuth origin／測試名單及發布狀態。以下 v0.5.0 的個別 Client ID 設定步驟以本節為準。
