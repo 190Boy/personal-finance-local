@@ -56,16 +56,16 @@ export function parseEsunTable(draft,{mapping=draft.mapping,headerIndex=draft.he
   if(expense===null||income===null)errors.push('INVALID_AMOUNT');if(balance===null)errors.push('INVALID_BALANCE');
   if(expense===0&&income===0)errors.push('ZERO_FLOW');if(expense>0&&income>0)errors.push('BOTH_DIRECTIONS');if(expense<0||income<0)errors.push('NEGATIVE_FLOW');
   const feeText=get('fee'),fee=feeText?moneyCents(feeText):null;
-  if(feeText&&(fee===null||fee!==0))errors.push('FEE_REQUIRES_REVIEW');
+  if(feeText&&(fee===null||fee<0))errors.push('FEE_REQUIRES_REVIEW');
   const t={bank:BANKS.esun,date,time:tm.value,summary,note:get('note'),expenseCents:expense,incomeCents:income,balanceCents:balance,feeCents:fee,typeHint:transactionHint(summary+' '+get('note')),page:null,endPage:null,line:row.line,sourceLine:row.line,sheetName:draft.sheetName,errors,reviewStatus:'needs_review'};
   // Keep malformed records visible; do not match incomplete rows as duplicates.
-  if(!errors.length){const key=[date,tm.value,summary,expense,income,balance].join('\u001f');const prior=seen.get(key);
+  if(!errors.length){const key=[date,tm.value,summary,expense,income,balance,fee].join('\u001f');const prior=seen.get(key);
    if(prior){prior.errors.push('DUPLICATE_CANDIDATE');t.errors.push('DUPLICATE_CANDIDATE');}else seen.set(key,t);}
   transactions.push(t);
  }
  if(!transactions.length)issues.push({code:'NO_TRANSACTIONS',page:null,line:null});
  const ordered=order==='descending'?[...transactions].reverse():transactions;
  for(let i=1;i<ordered.length;i++){const a=ordered[i-1],b=ordered[i];if(a.date&&b.date&&(a.date>b.date||(a.date===b.date&&a.time&&b.time&&a.time>b.time)))issues.push({code:'ORDER_MISMATCH',page:null,line:b.line});}
- const balance=reconcile(transactions,{order,openingCents}),invalidRows=transactions.filter(t=>t.errors.length).length;
- return {parserVersion:'0.4.0',sourceType:'excel',bank:BANKS.esun,transactions,issues,headers:[{line:draft.rows[headerIndex].line,fields:Object.keys(mapping)}],stats:{rows:transactions.length,invalidRows,pages:0,datesSeen:transactions.filter(t=>t.date).length},balance,validation:{status:'needs_review',fieldChecksPass:transactions.length>0&&invalidRows===0&&issues.length===0,balanceChecksComplete:balance.complete,realBankSamplesVerified:false,message:'Excel 本機預覽，需逐欄核對。'}};
+ const balance=reconcile(transactions,{order,openingCents,debitFees:true}),invalidRows=transactions.filter(t=>t.errors.length).length;
+ return {parserVersion:'0.4.2',sourceType:'excel',feePolicy:'expense_plus_fee_income_unchanged',bank:BANKS.esun,transactions,issues,headers:[{line:draft.rows[headerIndex].line,fields:Object.keys(mapping)}],stats:{rows:transactions.length,invalidRows,pages:0,datesSeen:transactions.filter(t=>t.date).length},balance,validation:{status:'needs_review',fieldChecksPass:transactions.length>0&&invalidRows===0&&issues.length===0,balanceChecksComplete:balance.complete,realBankSamplesVerified:false,message:'Excel 本機預覽，需逐欄核對。'}};
 }

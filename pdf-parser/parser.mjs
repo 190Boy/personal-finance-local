@@ -102,7 +102,7 @@ export function timeValue(s){
 function identity(t){
  return [t.bank,t.date,t.time??'',t.summary,t.expenseCents,t.incomeCents,t.balanceCents].join('\u001f');
 }
-export function reconcile(transactions,{order='ascending',openingCents=null}={}){
+export function reconcile(transactions,{order='ascending',openingCents=null,debitFees=false}={}){
  const rows=order==='descending'?[...transactions].reverse():[...transactions];
  let previous=openingCents;let gaps=0,checked=0,failed=0;
  for(const t of rows){
@@ -111,9 +111,10 @@ export function reconcile(transactions,{order='ascending',openingCents=null}={})
   if(!usable){t.balanceCheck={status:'uncheckable'};previous=null;gaps++;continue;}
   if(previous===null){t.balanceCheck={status:'no_opening'};gaps++;}
   else{
-   const expected=previous-t.expenseCents+t.incomeCents;
+   const feeDebit=debitFees&&t.expenseCents>0?(t.feeCents??0):0;
+   const expected=previous-t.expenseCents-feeDebit+t.incomeCents;
    const difference=t.balanceCents-expected;
-   t.balanceCheck={status:difference===0?'pass':'fail',expectedCents:expected,differenceCents:difference};
+   t.balanceCheck={status:difference===0?'pass':'fail',expectedCents:expected,differenceCents:difference,...(debitFees?{feeDebitCents:feeDebit}:{})};
    checked++;if(difference!==0)failed++;
   }
   previous=t.balanceCents;
