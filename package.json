@@ -1,0 +1,15 @@
+{
+  "name": "finance-local-pdf-lab",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Local-only PDF.js bank statement parsing experiment",
+  "scripts": {
+    "start": "node tools/serve.cjs",
+    "test": "node --test tests/*.test.mjs",
+    "build:pwa": "node tools/build-sw.cjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "UNLICENSED"
+}

@@ -1,3 +1,4 @@
+import {CARD_HEADERS,makeCardImport} from '../cloud/credit-cards.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {GoogleStore} from '../cloud/google.mjs';
@@ -79,3 +80,5 @@ test('new devices importing the same snapshot through different files do not add
 test('coordination metadata near capacity stops safely without deleting or appending financial rows',async()=>{const m=mock();m.metadata.push({metadataId:123,metadataKey:'x',metadataValue:'x'.repeat(28001),location:{spreadsheet:true}});await assert.rejects(m.store().save(await bankBatch('file',[t('測試',10000)])),/SYNC_METADATA_LIMIT/);assert.equal(m.tables['銀行存款'].length,1);assert.equal(m.metadata.length,1);});
 
 test('unknown legacy snapshot headers are not hidden or overwritten when inventory is already merged',()=>{assert.throws(()=>mergeStockTables([HOLDING_HEADERS],[['custom snapshot header']]),/SHEET_SCHEMA/);});
+
+test('credit card writes use shared ledger, serialize overlapping device imports and reload history',async()=>{const m=mock({barrier:true,tables:{'信用卡':[CARD_HEADERS]}}),parsed={bank:'合成銀行',transactions:[{date:'2026-09-01',postingDate:'2026-09-02',summary:'合成消費',amountCents:10000,kind:'消費',currency:'',foreignAmount:'',errors:[],line:2}]},opt={account:'合成卡',month:'2026-09'},a=await makeCardImport(parsed,{...opt,fileHash:'A'}),b=await makeCardImport(parsed,{...opt,fileHash:'B'});await Promise.all([m.store().saveCards(a),m.store().saveCards(b)]);assert.equal(m.tables['信用卡'].length,3);assert.equal(m.tables['匯入紀錄'].length,3);assert.ok(m.collisions>=1);const r=await m.store().summary();assert.equal(r.history.rows.length,1);assert.equal(r.history.rows[0].kind,'信用卡');assert.equal(r.credits.accounts.length,0);assert.equal((await m.store().saveCards(a)).repeated,true);});

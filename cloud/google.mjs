@@ -1,3 +1,4 @@
+import {CARD_HEADERS,cardSummary,cardHistory,cardRowsToAppend} from './credit-cards.mjs';
 import {rowsToAppend} from './dedup.mjs';
 import {mergeStockTables} from './stock-layout.mjs';
 import {ledgerPlan,migrationId} from './ledger.mjs';
@@ -43,7 +44,7 @@ export class GoogleStore{
  }
  async read(tab){
   if(!this.sheets.some(s=>s.title===tab))return [];
-  const data=await this.api(SHEETS+'/'+this.file.id+'/values/'+encodeURIComponent("'"+tab+"'!A:S")+'?valueRenderOption=UNFORMATTED_VALUE');
+  const data=await this.api(SHEETS+'/'+this.file.id+'/values/'+encodeURIComponent("'"+tab+"'!A:Z")+'?valueRenderOption=UNFORMATTED_VALUE');
   const rows=data.values||[];if(rows.length>100001)throw Error('CLOUD_ROW_LIMIT');return rows;
  }
 
@@ -74,7 +75,9 @@ export class GoogleStore{
    const values=await this.read('股票庫存');if(values.length&&JSON.stringify(values[0])!==JSON.stringify(STOCK_SCHEMAS['股票庫存']))throw Error('SHEET_SCHEMA');
    stocks=stockSummary({'股票庫存':values.slice(1)});
   }catch(e){if(e.message==='GOOGLE_LOGIN_REQUIRED')throw e;warnings.push('股票資產或紀錄轉換尚未完成：'+readReason(e));stocks.pending.push({account:'股票資料',reason:'載入或轉換失敗，未列入合計'});}
-  return {...bankSummary(rows),accounts:savedAccounts(rows),stocks,history:{...cloudHistory(rows,moves),warnings}};
+  let credits={totalCents:0,accounts:[],pending:[]},creditHistory={rows:[],duplicates:0};try{const values=await this.read('信用卡');if(values.length&&JSON.stringify(values[0])!==JSON.stringify(CARD_HEADERS))throw Error('SHEET_SCHEMA');credits=cardSummary(values.slice(1));creditHistory=cardHistory(values.slice(1));}catch(e){if(e.message==='GOOGLE_LOGIN_REQUIRED')throw e;warnings.push('信用卡讀取未完成：'+readReason(e));credits.pending.push({bank:'信用卡',account:'',reason:'載入失敗'});}
+  const history=cloudHistory(rows,moves);history.rows.push(...creditHistory.rows);history.rows.sort((a,b)=>b.date.localeCompare(a.date)||b.time.localeCompare(a.time)||b.ordinal-a.ordinal);history.duplicates+=creditHistory.duplicates;
+  return {...bankSummary(rows),accounts:savedAccounts(rows),stocks,credits,history:{...history,warnings}};
  }
  async stockMovements(){const values=await this.read('股票異動');if(values.length&&JSON.stringify(values[0])!==JSON.stringify(STOCK_SCHEMAS['股票異動']))throw Error('SHEET_SCHEMA');return values.slice(1);}
  async saveBankOnce(batch,revision){
@@ -170,6 +173,19 @@ export class GoogleStore{
   if(this.saving)throw Error('SYNC_BUSY');this.saving=true;
   try{await this.unifiedLog();await this.mergedStocks();return await this.coordinated(revision=>this.saveStockOnce(batch,revision));}
   finally{this.saving=false;}
+ }
+
+ async saveCards(batch){
+  if(this.saving)throw Error('SYNC_BUSY');this.saving=true;
+  try{await this.unifiedLog();await this.ensure('信用卡',CARD_HEADERS);return await this.coordinated(async revision=>{
+   const epoch=this.epoch,fileId=this.file?.id,logs=(await this.read('匯入紀錄')).slice(1);
+   if(logs.some(r=>r[0]===batch.id))return {repeated:true,added:0};
+   const fresh=cardRowsToAppend((await this.read('信用卡')).slice(1),batch.rows),log=[...batch.log];log[6]=fresh.filter(r=>r[0]==='明細').length;
+   const requests=[this.revisionRequest(revision),...(fresh.length?[{appendCells:{sheetId:this.sheets.find(s=>s.title==='信用卡').sheetId,rows:cells(fresh),fields:'userEnteredValue'}}]:[]),{appendCells:{sheetId:this.sheets.find(s=>s.title==='匯入紀錄').sheetId,rows:cells([log]),fields:'userEnteredValue'}}];
+   if(epoch!==this.epoch||fileId!==this.file?.id)throw Error('GOOGLE_LOGIN_REQUIRED');
+   try{await this.api(SHEETS+'/'+fileId+':batchUpdate',{method:'POST',body:{requests}});}catch(e){if((await this.read('匯入紀錄')).slice(1).some(r=>r[0]===batch.id))return {repeated:true,added:0};throw e;}
+   return {repeated:false,added:log[6]};
+  });}finally{this.saving=false;}
  }
 
 }

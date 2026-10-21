@@ -1,0 +1,28 @@
+## v0.7.0 信用卡隱私更新
+
+新增中信 CSV／凱基 Excel 本機匯入、帳單待繳確認、同一份試算表一張「信用卡」表、共用匯入紀錄與信用卡歷史。詳見 [CREDIT-CARDS.md](CREDIT-CARDS.md)。沒有新增 OAuth 權限或依賴；不改銀行自動儲存與股票流程。發布後請關閉舊網站／PWA視窗再重開，確認v0.7.0；SW公開資源227項。iPhone及真實Google同步待使用者驗收，下方為歷史版本紀錄。
+
+# 安全設計與邊界
+資料路徑：本機 File → ArrayBuffer → 專屬模組 Worker / PDF.js → 文字座標 → 記憶體預覽 → 使用者明確觸發 Blob 下載。
+沒有 PDF URL 參數；沒有 fetch／XHR／sendBeacon 上傳；沒有 GAS、Cloud Run、OAuth、Sheets API 或背景同步。
+密碼只作為 PDF.js 的 password 參數，UI 送出即清空，工作完成／錯誤／取消後銷毀任務與 Worker。取消採競速中止及有限時間釋放，舊工作不能覆蓋新畫面。
+雜湊與交易去重集合只存在單頁記憶體，不輸出至 JSON、Cookie 或儲存空間。匯出不包含檔名、密碼、原始 PDF 或頁面全文，但交易摘要／備註仍可能含個資。
+
+所有 PDF 內容以 textContent 呈現，不使用 innerHTML，不執行 PDF JavaScript、註解動作、連結或嵌入媒體。不載入 viewer 或 sandbox 程式，只使用文字擷取 API。使用嚴格 CSP，未開放 unsafe-inline／unsafe-eval；useWasm false，關閉 XFA。程式提供 isEvalSupported false 作防禦設定；最終限制仍依實際版本與 CSP，而不是只信任選項名稱。
+CSV 文字欄位中以空白／控制字元後接 =、+、-、@ 開頭的值會加單引號，降低試算表公式注入風險。
+
+上限：25 MiB、200 頁、20 萬文字項目、200 萬字元、PDF 處理 90 秒。這些是可用性限制，不代表所有惡意 PDF 都無法造成資源耗盡。僅文字擷取，未做 OCR、圖片／頁面渲染。
+同一 PDF 不支援混合多帳戶、多幣別、旋轉文字或頁面；不得將未校驗結果自動入帳。
+
+網路只允許同站靜態資源，因中文字碼表與標準字型可能需要下載。靜態主機會收到一般頁面／資源請求與網路中繼資料；不能把「不傳 PDF／密碼」說成「使用網站不會產生任何網路資料」。
+Chrome 合成端到端測試對每個請求檢查同源、固定靜態路徑、GET、無 query、無 body；未觀察到資料請求。這是特定版本和測試的證據，不是對所有裝置的永久保證。
+
+不儲存不等於安全抹除：JavaScript 字串、瀏覽器回收、作業系統交換記憶體、瀏覽器擴充功能、開發者工具及已下載檔案均不在工具完全控制範圍。高權限木馬或被入侵的裝置仍可能取得密碼／解密資料。
+若未來本機相容性失敗，先檢查版本、模組 Worker、CMap、加密類型、文字座標。不得自動退回任何後端。雲端備援如需研究，必須獨立技術結論、明確使用者同意及新的資料處理設計。
+
+依賴版本審查與雜湊見 DEPENDENCIES.md。第一階段頁面不與任何未來 OAuth token 共用執行流程；加入 OAuth 前應重新做權限、內容隔離與安全審查。
+
+## v0.3.0 公開資源快取
+本版新增 Cache Storage，只存 sw.js 中固定清單的 198 個公開資源。PDF、密碼、OAuth Token、交易、Blob、API、query、Authorization、Range 不會進入快取路徑；沒有 runtime cache.put。動態 DOM 不序列化，離線重新載入也不恢復預覽。
+清除與更新只處理包含本 Repo 路徑的快取前綴；不清除其他專案。新 Worker 不強制接管執行中的舊版。OAuth 尚未實作，相關排除不能被誤稱為登入已驗證。
+桌面合成測試確認快取沒有指定私密交易標記與測試密碼，沒有 PDF URL，localStorage／sessionStorage／Cookie／IndexedDB 仍空。完整細節見 PWA.md。

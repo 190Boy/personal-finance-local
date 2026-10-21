@@ -1,0 +1,46 @@
+{
+  "version": "0.7.0",
+  "date": "2026-10-21",
+  "browser": "Windows Chrome",
+  "unitTests": {
+    "passed": 117,
+    "failed": 0
+  },
+  "providedFilesLocalOnly": {
+    "kgiExcel": {
+      "transactions": 19,
+      "fieldErrors": 0,
+      "sourceTotalMatches": true
+    },
+    "ctbcCsv": {
+      "encoding": "Big5",
+      "transactions": 14,
+      "fieldErrors": 0,
+      "repayments": 1,
+      "inferredBillMonth": false
+    },
+    "externalRequests": 0,
+    "cloudWrites": 0,
+    "sourceContentPublished": false
+  },
+  "syntheticBrowser": {
+    "cards": "pass: preview, explicit confirmation, one sheet/shared ledger, dedup, refund/payment history, partial billed debt, reload/logout, 390px width",
+    "bank": "pass: encrypted Excel, auto-save, balance and account selection",
+    "stocks": "pass: preview, confirmation, merged inventory, homepage and history",
+    "login": "pass: 10 scenarios"
+  },
+  "pwa": {
+    "publicAssets": 227,
+    "sensitiveRuntimeCaching": false
+  },
+  "liveGoogleSheets": "not tested; mocked APIs only",
+  "iPhoneSafari": "not tested",
+  "iPhoneHomeScreenPwa": "not tested",
+  "androidChrome": "not tested",
+  "limitations": [
+    "billed remaining is manually attested and dated; not live total card debt",
+    "CTBC CSV requires manual billing metadata",
+    "cross-source payment matching not implemented",
+    "source formats other than supplied headers unverified"
+  ]
+}

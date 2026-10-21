@@ -5,7 +5,9 @@ export function assetParts(summary){
  return [{name:'銀行存款',cents:summary.totalCents,color:'#1763aa'},{name:'股票市值',cents:summary.stocks?.totalCents||0,color:'#16a487'}].filter(p=>Number.isSafeInteger(p.cents)&&p.cents>0);
 }
 export function renderAssets(summary){
- const stocks=summary?.stocks;
+ const stocks=summary?.stocks,credits=summary?.credits;
+ $('creditCardDebt').textContent=credits?.accounts.length?(credits.pending.length?'部分合計 NT$ ':'NT$ ')+money(credits.totalCents):summary?'待確認／尚無帳單':'尚未同步';
+ $('creditCardDetail').textContent=credits?(credits.accounts.map(a=>a.bank+'／'+a.account+'：'+a.month+' 帳單待繳 NT$ '+money(a.cents)+'；結帳 '+a.closing+'；截止 '+a.due+'；繳款核對 '+a.asOf).join('；')||'尚無已確認帳單待繳。')+(credits.pending.length?'；'+credits.pending.map(p=>p.bank+'／'+p.account+'：'+p.reason).join('；'):'')+' 僅顯示已確認的帳單總額減結帳後已繳，非即時總負債；不包含未出帳及未來分期。':'連接 Google 後載入信用卡帳單。';
  $('stockAssets').textContent=stocks?.accounts.length?'NT$ '+money(stocks.totalCents):'尚未同步';
  $('stockAssetDetail').textContent=stocks?stocks.accounts.map(a=>a.broker+'／'+a.account+'：NT$ '+money(a.totalCents)+'；報表 '+a.asOf.replace('T',' ')+'；收盤價日期 '+(a.priceDates.join('、')||'無庫存')).join('；')+(stocks.pending.length?'；'+stocks.pending.map(p=>p.account+'：'+p.reason).join('；'):'')||'尚無已儲存股票快照。':'連接 Google 後載入已確認的股票快照。';
  $('assetPie').replaceChildren();$('assetLegend').replaceChildren();

@@ -1,3 +1,4 @@
+import {makeCardImport} from './credit-cards.mjs';
 import {initHistory,renderHistory,clearHistory} from '../web/history.mjs';
 import {renderAssets} from '../web/assets.mjs';
 import {makeStockImport} from './stocks.mjs';
@@ -115,5 +116,5 @@ export function initCloud({getPayload}){
  $('historyConnect').addEventListener('click',()=>{if(store.connected)void refresh();else connect();});
 
  window.addEventListener('pagehide',()=>{authAttempt++;working=false;clearTimeout(expiryTimer);store.disconnect();clearSummary();controls();});
- return {saveStocks:async payload=>{if(working)throw Error('SYNC_BUSY');if(!store.connected)throw Error('GOOGLE_LOGIN_REQUIRED');working=true;controls();try{const batch=await makeStockImport(payload);const saved=await store.saveStocks(batch);await summary();return saved;}finally{working=false;controls();}},savedImport:async()=>{if($('autoCloud').checked&&store.connected)await save();else notice('本次匯入尚未存到雲端；連接 Google 後可點「儲存本次匯入」。');}};
+ return {saveCards:async ({parsed,options})=>{if(working)throw Error('SYNC_BUSY');if(!store.connected)throw Error('GOOGLE_LOGIN_REQUIRED');working=true;controls();try{const batch=await makeCardImport(parsed,options);const saved=await store.saveCards(batch);await summary();return saved;}finally{working=false;controls();}},saveStocks:async payload=>{if(working)throw Error('SYNC_BUSY');if(!store.connected)throw Error('GOOGLE_LOGIN_REQUIRED');working=true;controls();try{const batch=await makeStockImport(payload);const saved=await store.saveStocks(batch);await summary();return saved;}finally{working=false;controls();}},savedImport:async()=>{if($('autoCloud').checked&&store.connected)await save();else notice('本次匯入尚未存到雲端；連接 Google 後可點「儲存本次匯入」。');}};
 }
