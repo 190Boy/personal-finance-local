@@ -1,0 +1,9 @@
+{
+  "version": "0.5.4",
+  "unitTestsPassed": 19,
+  "loginBrowserCasesPassed": 10,
+  "existingCloudImportRegression": "pass",
+  "googleAuth": "mocked; real account not tested",
+  "iphoneSafari": "not tested",
+  "driveMirror": "disabled per user instruction"
+}

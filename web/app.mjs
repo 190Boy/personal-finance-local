@@ -28,10 +28,11 @@ let extractor=null,result=null,pages=null,busy=false,run=0,controller=null;
 let tableDraft=null,excelBook=null,importContext=null;
 const seenFiles=new Set(),seenTransactions=new Set(),urls=new Set();
 
-const routes=['home','transactions','import','settings'];
+const routes=['login','home','transactions','import','settings'];
 function updateRoute(focus=false){
  const requested=location.hash.slice(1);
- const route=routes.includes(requested)?requested:'home';
+ const route=routes.includes(requested)?requested:'login';
+ document.body.classList.toggle('login-view',route==='login');
  document.querySelectorAll('[data-route]').forEach(view=>{view.hidden=view.dataset.route!==route;});
  document.querySelectorAll('[data-nav]').forEach(link=>{
   if(link.dataset.nav===route)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
@@ -44,6 +45,7 @@ function updateRoute(focus=false){
  }
 }
 window.addEventListener('hashchange',()=>updateRoute(true));
+window.addEventListener('finance-signout',clearAll);
 
 const sensitiveInputs=['pdfFile','password','opening','account'];
 const format=c=>Number.isSafeInteger(c)?(c/100).toLocaleString('zh-TW',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
