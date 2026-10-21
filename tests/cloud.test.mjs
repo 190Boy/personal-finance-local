@@ -38,6 +38,7 @@ test('overlapping files produce stable row IDs but retain repeated same-file occ
 function mockStore({failWrite=false,logged=false}={}){
  let writes=0,last=null;const rows={'銀行存款':[HEADERS],'匯入紀錄':[IMPORT_HEADERS]};
  const s=new GoogleStore({fetcher:async(url,options)=>{
+  if(url.includes('?fields=developerMetadata'))return {ok:true,status:200,json:async()=>({developerMetadata:[]})};
   if(url.includes('/values/')){const tab=decodeURIComponent(url.split('/values/')[1].split('?')[0]).split("'")[1];return {ok:true,status:200,json:async()=>({values:rows[tab]||[]})};}
   writes++;last=JSON.parse(options.body);if(failWrite)return {ok:false,status:500};
   for(const req of last.requests){if(req.appendCells){const tab=req.appendCells.sheetId===1?'銀行存款':'匯入紀錄';rows[tab].push(...req.appendCells.rows.map(r=>r.values.map(c=>c.userEnteredValue.stringValue??c.userEnteredValue.numberValue)));}}
@@ -45,11 +46,11 @@ function mockStore({failWrite=false,logged=false}={}){
  }});s.authorize('synthetic-token',3600);s.file={id:'synthetic-sheet'};s.sheets=[{title:'銀行存款',sheetId:1},{title:'匯入紀錄',sheetId:2}];return {s,rows,get writes(){return writes;},get last(){return last;}};
 }
 test('atomic save records ledger and rows once; retry does not append duplicates',async()=>{
- const m=mockStore(),b=await batch();const first=await m.s.save(b),again=await m.s.save(b);assert.equal(first.added,1);assert.equal(again.repeated,true);assert.equal(m.writes,1);assert.equal(m.rows['銀行存款'].length,2);assert.equal(m.last.requests.length,3);
+ const m=mockStore(),b=await batch();const first=await m.s.save(b),again=await m.s.save(b);assert.equal(first.added,1);assert.equal(again.repeated,true);assert.equal(m.writes,1);assert.equal(m.rows['銀行存款'].length,2);assert.equal(m.last.requests.length,4);
 });
 test('formula-looking bank summaries are written as stringValue, not formulas',async()=>{
  const m=mockStore(),b=await batch('玉山銀行','主要','x',[transaction({summary:'=HYPERLINK("bad")'})]);await m.s.save(b);
- assert.deepEqual(m.last.requests[1].appendCells.rows[0].values[5].userEnteredValue,{stringValue:'=HYPERLINK("bad")'});
+ assert.deepEqual(m.last.requests[2].appendCells.rows[0].values[5].userEnteredValue,{stringValue:'=HYPERLINK("bad")'});
 });
 test('failed cloud write does not create a successful ledger entry',async()=>{
  const m=mockStore({failWrite:true});await assert.rejects(m.s.save(await batch()),/GOOGLE_API/);assert.equal(m.rows['匯入紀錄'].length,1);

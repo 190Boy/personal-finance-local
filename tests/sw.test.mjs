@@ -37,6 +37,8 @@ test('allowlist contains no sensitive formats, APIs or user data stores',()=>{
  const files=vm.runInContext('FILES',context);
  assert.ok(files.length>150);
  assert.ok(files.includes('web/manifest.webmanifest'));
+ assert.ok(files.includes('cloud/dedup.mjs'));
+ assert.ok(files.includes('cloud/stock-layout.mjs'));
  assert.ok(files.includes('web/icons/icon-180.png'));
  assert.ok(!files.some(f=>/\.pdf$|\.csv$|oauth|transactions|legacy-gas|source-wallet|test-results/i.test(f)));
  assert.ok(!code.includes('skipWaiting('));

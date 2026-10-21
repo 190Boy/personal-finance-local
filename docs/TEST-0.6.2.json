@@ -1,0 +1,36 @@
+{
+  "version": "0.6.2",
+  "date": "2026-10-21",
+  "unitTests": {
+    "pass": 48,
+    "fail": 0
+  },
+  "loginMockCases": 10,
+  "bankImportRegression": "pass",
+  "stockMergedInventoryBrowser": "pass",
+  "mobileHistoryMock": {
+    "pass": true,
+    "rows": 207,
+    "viewport": "390x844",
+    "checks": [
+      "direct page Google connection",
+      "collapsed filters",
+      "first transaction card above bottom navigation",
+      "refresh failure and retry",
+      "merged stock schema migration",
+      "legacy history retained",
+      "re-login reload",
+      "logout clearing"
+    ]
+  },
+  "concurrentStoresMock": {
+    "overlappingBankFiles": "pass",
+    "sameSnapshotDifferentFiles": "pass",
+    "lostResponse": "pass",
+    "conflictRetained": "pass"
+  },
+  "realGoogleMigrationAndRace": "not tested",
+  "iphoneSafari": "not tested",
+  "android": "not tested",
+  "privateSamplesPublished": false
+}

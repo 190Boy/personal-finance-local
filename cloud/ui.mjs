@@ -7,7 +7,7 @@ import {GOOGLE_CLIENT_ID} from './config.mjs';
 import {GoogleStore,SCOPE} from './google.mjs';
 import {makeImport} from './records.mjs';
 const $=id=>document.getElementById(id),store=new GoogleStore();
-const messages={ACCOUNT_REQUIRED:'請先填寫帳戶代稱，例如「玉山主要帳戶」；同一帳戶每次使用相同名稱。',NO_RECORDS:'尚無本次交易可儲存。',GOOGLE_LOGIN_REQUIRED:'請到設定重新連接 Google；授權可能已過期。',GOOGLE_NETWORK:'連線中斷，請重試；重試前會檢查匯入紀錄，避免同檔重複寫入。',GOOGLE_PERMISSION:'Google 權限不足，請確認已啟用 Drive API、Sheets API，並同意檔案權限。',GOOGLE_API:'Google 未完成操作。請確認 API 設定，稍後重試。',SHEET_SCHEMA:'試算表欄位與目前版本不同，請保留系統欄名及順序。',MULTIPLE_SPREADSHEETS:'找到多份「我的理財紀錄」，請在 Drive 整理重複的應用程式試算表後重連。',CLOUD_ROW_LIMIT:'雲端資料超過目前 100,000 列讀取上限。',SYNC_BUSY:'正在儲存，請稍候。'};
+const messages={ACCOUNT_REQUIRED:'請先填寫帳戶代稱，例如「玉山主要帳戶」；同一帳戶每次使用相同名稱。',NO_RECORDS:'尚無本次交易可儲存。',GOOGLE_LOGIN_REQUIRED:'請到設定重新連接 Google；授權可能已過期。',GOOGLE_NETWORK:'連線中斷，請重試；重試前會檢查匯入紀錄，避免同檔重複寫入。',GOOGLE_PERMISSION:'Google 權限不足，請確認已啟用 Drive API、Sheets API，並同意檔案權限。',GOOGLE_API:'Google 未完成操作。請確認 API 設定，稍後重試。',SHEET_SCHEMA:'試算表欄位與目前版本不同，請保留系統欄名及順序。',MULTIPLE_SPREADSHEETS:'找到多份「我的理財紀錄」，請在 Drive 整理重複的應用程式試算表後重連。',CLOUD_ROW_LIMIT:'雲端資料超過目前 100,000 列讀取上限。',SYNC_BUSY:'正在儲存，請稍候。',SYNC_RETRY:'其他裝置正在同步，請稍後重試；尚未完成的資料仍保留。',SYNC_REVISION_INVALID:'同步協調標記異常，請保留試算表並聯絡維護者。',SYNC_METADATA_LIMIT:'同步標記接近容量上限，請先維護試算表；本次預覽保留，沒有自動刪資料。'};
 let gisPromise=null,working=false,preparing=false,expiryTimer=null,accountChoices=null,remembered='',rememberChoice=false,authAttempt=0;
 const browserStorage=()=>{try{return globalThis.localStorage;}catch{return null;}};
 function drawRemembered(){
@@ -16,15 +16,17 @@ function drawRemembered(){
  $('loginGoogle').textContent=store.connected?'繼續使用':remembered?'以 '+remembered+' 連接 Google':'使用 Google 連接';
 }
 
-function notice(text){$('cloudStatus').textContent=text;$('syncNotice').textContent=text;$('loginNotice').textContent=text;}
+function notice(text){$('cloudStatus').textContent=text;$('syncNotice').textContent=text;$('loginNotice').textContent=text;$('historyNotice').textContent=/^(Google 已連接|已載入雲端)/.test(text)?'':text;}
 function gis(){
  if(globalThis.google?.accounts?.oauth2)return Promise.resolve();
  if(!gisPromise)gisPromise=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=resolve;script.onerror=()=>{gisPromise=null;script.remove();reject(Error('GOOGLE_NETWORK'));};document.head.append(script);});
  return gisPromise;
 }
 function controls(){
- if(!store.connected&&store.user){store.disconnect();clearSummary();}
+ if(!store.connected){if(store.user)store.disconnect();clearSummary();}
  const connected=store.connected;
+ $('historyConnect').textContent=working?'正在載入…':connected?'重新載入交易':'連接 Google 並載入';$('historyConnect').disabled=working||preparing;
+ $('historyConnection').textContent=connected?'已連接：'+(store.user?.emailAddress||'正在確認帳戶'):'尚未連接 Google；重開網站或授權到期後需重新連接。';
  $('connectGoogle').textContent=connected?'登出':'連接 Google';
  $('refreshCloud').hidden=!connected;
  $('googleAccount').hidden=!connected;
@@ -50,7 +52,7 @@ function clearSummary(){
  $('bankDeposit').textContent='尚未同步';$('bankDepositDetail').textContent='連接 Google 後載入各帳戶最後餘額。';$('cloudSheetLink').hidden=true;
 }
 async function summary(){
- const result=await store.summary();renderAssets(result);renderHistory(result.history);
+ await store.metadata();const result=await store.summary();renderAssets(result);renderHistory(result.history);
  accountChoices?.update(result.accounts||{});
  $('bankDeposit').textContent=result.balances.length?(result.pending.length?'部分合計 NT$ ':'NT$ ')+(result.totalCents/100).toLocaleString('zh-TW',{minimumFractionDigits:2,maximumFractionDigits:2}):'尚無可核對餘額';
  $('bankDepositDetail').textContent=(result.balances.length?result.balances.map(b=>b.bank+'／'+b.account+'：'+(b.cents/100).toLocaleString('zh-TW')+'（'+b.date+'）').join('；'):'尚無已儲存的銀行明細。')+(result.pending.length?'；'+result.pending.length+' 個帳戶餘額或交易先後待確認，未列入合計。':'')+' 此為匯入明細最後餘額，非銀行即時餘額。';
@@ -77,7 +79,7 @@ export function initCloud({getPayload}){
  }
  $('syncCloud').addEventListener('click',save);
  // Preload GIS on login/settings; OAuth is requested only after the user clicks.
- const prepare=()=>{if(!['','#login','#settings'].includes(location.hash)||!GOOGLE_CLIENT_ID||globalThis.google?.accounts?.oauth2||preparing)return;preparing=true;controls();void gis().catch(()=>notice('Google 連接元件無法載入；可重試或先使用本機匯入。')).finally(()=>{preparing=false;controls();});};
+ const prepare=()=>{if(!['','#login','#settings','#transactions'].includes(location.hash)||!GOOGLE_CLIENT_ID||globalThis.google?.accounts?.oauth2||preparing)return;preparing=true;controls();void gis().catch(()=>notice('Google 連接元件無法載入；可重試或先使用本機匯入。')).finally(()=>{preparing=false;controls();});};
  window.addEventListener('hashchange',prepare);prepare();
  function connect({forceChooser=false,fromLogin=false}={}){
   if(working||preparing)return;
@@ -108,7 +110,9 @@ export function initCloud({getPayload}){
  $('switchLoginAccount').addEventListener('click',()=>connect({forceChooser:true,fromLogin:true}));
  $('rememberAccount').addEventListener('change',()=>{rememberChoice=$('rememberAccount').checked;if(!rememberChoice){remembered='';rememberAccount(browserStorage(),'');}else if(store.connected){remembered=store.user?.emailAddress||'';rememberAccount(browserStorage(),remembered);}drawRemembered();});
  $('forgetAccount').addEventListener('click',()=>{remembered='';rememberChoice=false;rememberAccount(browserStorage(),'');drawRemembered();notice('已忘記這台裝置記住的帳號；雲端資料不受影響。');});
- $('refreshCloud').addEventListener('click',async()=>{if(working)return;working=true;controls();try{await summary();notice('已重新載入雲端餘額。');}catch(e){notice(messages[e.message]||'載入失敗。');}finally{working=false;controls();}});
+ async function refresh(){if(working)return;working=true;controls();notice('正在讀取雲端歷史與資產…');try{await summary();notice('已載入雲端歷史交易與資產。');}catch(e){notice((messages[e.message]||'載入失敗。')+' 尚未成功重新載入，請重試；已載入的舊資料若有仍保留。');}finally{working=false;controls();}}
+ $('refreshCloud').addEventListener('click',refresh);
+ $('historyConnect').addEventListener('click',()=>{if(store.connected)void refresh();else connect();});
 
  window.addEventListener('pagehide',()=>{authAttempt++;working=false;clearTimeout(expiryTimer);store.disconnect();clearSummary();controls();});
  return {saveStocks:async payload=>{if(working)throw Error('SYNC_BUSY');if(!store.connected)throw Error('GOOGLE_LOGIN_REQUIRED');working=true;controls();try{const batch=await makeStockImport(payload);const saved=await store.saveStocks(batch);await summary();return saved;}finally{working=false;controls();}},savedImport:async()=>{if($('autoCloud').checked&&store.connected)await save();else notice('本次匯入尚未存到雲端；連接 Google 後可點「儲存本次匯入」。');}};

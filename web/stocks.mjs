@@ -43,7 +43,7 @@ export function initStocks(cloud){
   if(busy||!reconciliation?.pass||!$('stockConfirmed').checked||!$('stockTwd').checked)return;
   const mine=run;busy=true;controls();
   try{const saved=await cloud.saveStocks({snapshot,history,reconciliation,account:$('stockAccount').value,fileHashes});if(mine===run)$('stockStatus').textContent=saved.repeated?'此匯入已記錄，沒有重複寫入。':'已儲存到同一份雲端試算表的股票工作表，首頁市值與占比已更新。';}
-  catch(e){if(mine===run)$('stockStatus').textContent=({ACCOUNT_REQUIRED:'請填寫券商帳戶代稱。',GOOGLE_LOGIN_REQUIRED:'請先到設定連接 Google，再回來儲存。',SHEET_SCHEMA:'雲端股票工作表欄位已更動，請還原系統欄名。',SYNC_BUSY:'其他同步正在進行，請稍後重試。'}[e.message]||'雲端尚未完成，預覽保留；重新連接 Google 或稍後重試。');}
+  catch(e){if(mine===run)$('stockStatus').textContent=({ACCOUNT_REQUIRED:'請填寫券商帳戶代稱。',GOOGLE_LOGIN_REQUIRED:'請先到設定連接 Google，再回來儲存。',SHEET_SCHEMA:'雲端股票工作表欄位已更動，請還原系統欄名。',SYNC_BUSY:'其他同步正在進行，請稍後重試。',SYNC_RETRY:'其他裝置正在同步，請稍後重試；預覽仍保留。',SYNC_METADATA_LIMIT:'同步標記接近容量上限，請聯絡維護者；預覽保留，沒有自動刪資料。',SYNC_REVISION_INVALID:'同步協調標記異常，請保留試算表並聯絡維護者。'}[e.message]||'雲端尚未完成，預覽保留；重新連接 Google 或稍後重試。');}
   finally{if(mine===run){busy=false;controls();}}
  });
  $('stockExport').addEventListener('click',()=>{

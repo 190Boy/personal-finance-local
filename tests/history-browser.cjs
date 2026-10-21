@@ -21,7 +21,7 @@ const server=http.createServer((req,res)=>{const p=path.resolve(root,'.'+new URL
  assert.equal(rows['匯入紀錄'][0].length,10);assert.equal(rows['匯入紀錄'].length,3);assert.equal(rows['匯入紀錄'][2][3],'股票資產');assert.equal(rows['股票匯入紀錄'].length,2);
  await page.evaluate(()=>location.hash='transactions');assert.ok((await page.textContent('#historyCount')).includes('207 筆'));assert.equal(await page.locator('#historyRows tr').count(),100);
  await page.click('#historyMore');assert.equal(await page.locator('#historyRows tr').count(),200);await page.click('#historyMore');assert.equal(await page.locator('#historyRows tr').count(),207);
- await page.selectOption('#historyKind','股票股數');assert.equal(await page.locator('#historyRows tr').count(),1);assert.ok((await page.textContent('#historyRows')).includes('股'));
+ await page.locator('#historyFilters summary').click();await page.selectOption('#historyKind','股票股數');assert.equal(await page.locator('#historyRows tr').count(),1);assert.ok((await page.textContent('#historyRows')).includes('股'));
  await page.selectOption('#historyKind','銀行存款');await page.fill('#historyQuery','薪資');assert.equal(await page.locator('#historyRows tr').count(),2);assert.ok((await page.textContent('#historyRows')).includes('內容衝突'));assert.ok((await page.textContent('#historyRows')).includes('需要人工核對'));
  await page.click('#historyReset');await page.selectOption('#historyAccount',JSON.stringify(['測試銀行','儲蓄']));assert.ok((await page.textContent('#historyRows')).includes('儲蓄'));assert.ok(!(await page.textContent('#historyRows')).includes('主要'));
  await page.click('#historyReset');await page.fill('#historyFrom','2027-01-01');assert.equal(await page.locator('#historyRows tr').count(),0);await page.click('#historyReset');
