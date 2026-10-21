@@ -1,0 +1,19 @@
+{
+  "version": "0.6.0",
+  "date": "2026-10-21",
+  "realPdfChrome": {
+    "holdings": 4,
+    "movements": 28,
+    "continuityComparisons": 23,
+    "positionChecksIncludingZero": 5,
+    "pass": true
+  },
+  "syntheticCloudBrowser": "pass",
+  "bankCloudRegression": "pass",
+  "loginBrowserCases": 10,
+  "unitTests": 32,
+  "realGoogleSheets": "not tested",
+  "iphoneSafari": "not tested",
+  "android": "not tested",
+  "privateFixturesPublished": false
+}

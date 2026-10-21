@@ -1,3 +1,4 @@
+import {STOCK_SCHEMAS,stockSummary} from './stocks.mjs';
 import {savedAccounts} from './accounts.mjs';
 import {HEADERS,IMPORT_HEADERS,BANK_TABS,bankSummary} from './records.mjs';
 export const SCOPE='https://www.googleapis.com/auth/drive.file';
@@ -40,7 +41,7 @@ export class GoogleStore{
   const data=await this.api(SHEETS+'/'+this.file.id+'/values/'+encodeURIComponent("'"+tab+"'!A:S")+'?valueRenderOption=UNFORMATTED_VALUE');
   const rows=data.values||[];if(rows.length>100001)throw Error('CLOUD_ROW_LIMIT');return rows;
  }
- async summary(){let rows=[];for(const tab of BANK_TABS){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(HEADERS))throw Error('SHEET_SCHEMA');rows.push(...values.slice(1));}return {...bankSummary(rows),accounts:savedAccounts(rows)};}
+ async summary(){let rows=[];for(const tab of BANK_TABS){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(HEADERS))throw Error('SHEET_SCHEMA');rows.push(...values.slice(1));}const stockTables={};for(const tab of ['股票快照','股票庫存']){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(STOCK_SCHEMAS[tab]))throw Error('SHEET_SCHEMA');stockTables[tab]=values.slice(1);}return {...bankSummary(rows),accounts:savedAccounts(rows),stocks:stockSummary(stockTables)};}
  async save(batch){
   if(this.saving)throw Error('SYNC_BUSY');this.saving=true;const epoch=this.epoch,fileId=this.file?.id;
   try{
@@ -61,4 +62,29 @@ export class GoogleStore{
    return {added:fresh.length,repeated:false};
   }finally{this.saving=false;}
  }
+ async saveStocks(batch){
+  if(this.saving)throw Error('SYNC_BUSY');this.saving=true;
+  const epoch=this.epoch,fileId=this.file?.id;
+  try{
+   const sheets={};
+   for(const [tab,headers] of Object.entries(STOCK_SCHEMAS))sheets[tab]=await this.ensure(tab,headers);
+   const logs=(await this.read('股票匯入紀錄')).slice(1);
+   if(logs.some(r=>r[0]===batch.id))return {repeated:true};
+   const existingSnapshots=(await this.read('股票快照')).slice(1),existingMoves=new Set((await this.read('股票異動')).slice(1).map(r=>r[0]));
+   const hasSnapshot=existingSnapshots.some(r=>r[0]===batch.snapshotId);
+   const requests=[{createDeveloperMetadata:{developerMetadata:{metadataId:parseInt(batch.id.slice(0,7),16)+1,metadataKey:'financeStockImport',metadataValue:batch.id,visibility:'DOCUMENT',location:{spreadsheet:true}}}}];
+   if(!hasSnapshot)requests.push({createDeveloperMetadata:{developerMetadata:{metadataId:parseInt(batch.snapshotId.slice(0,7),16)+1,metadataKey:'financeStockSnapshot',metadataValue:batch.snapshotId,visibility:'DOCUMENT',location:{spreadsheet:true}}}});
+   for(const [tab,input] of Object.entries(batch.tables)){
+    let rows=input;
+    if(hasSnapshot&&['股票快照','股票庫存'].includes(tab))rows=[];
+    if(tab==='股票異動')rows=rows.filter(r=>!existingMoves.has(r[0]));
+    if(rows.length)requests.push({appendCells:{sheetId:sheets[tab].sheetId,rows:cells(rows),fields:'userEnteredValue'}});
+   }
+   if(epoch!==this.epoch||fileId!==this.file?.id)throw Error('GOOGLE_LOGIN_REQUIRED');
+   try{await this.api(SHEETS+'/'+fileId+':batchUpdate',{method:'POST',body:{requests}});}
+   catch(e){if((await this.read('股票匯入紀錄')).slice(1).some(r=>r[0]===batch.id))return {repeated:true};throw e;}
+   return {repeated:false};
+  }finally{this.saving=false;}
+ }
+
 }

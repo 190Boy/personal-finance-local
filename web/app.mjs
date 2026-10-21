@@ -1,3 +1,4 @@
+import {initStocks} from './stocks.mjs';
 import {initCloud} from '../cloud/ui.mjs';
 import {inspectTable,parseEsunTable,TABLE_FIELDS} from '../pdf-parser/tabular.mjs';
 import {readLocalExcel} from '../pdf-parser/excel.mjs';
@@ -28,14 +29,14 @@ let extractor=null,result=null,pages=null,busy=false,run=0,controller=null;
 let tableDraft=null,excelBook=null,importContext=null;
 const seenFiles=new Set(),seenTransactions=new Set(),urls=new Set();
 
-const routes=['login','home','transactions','import','settings'];
+const routes=['login','home','transactions','import','stocks','settings'];
 function updateRoute(focus=false){
  const requested=location.hash.slice(1);
  const route=routes.includes(requested)?requested:'login';
  document.body.classList.toggle('login-view',route==='login');
  document.querySelectorAll('[data-route]').forEach(view=>{view.hidden=view.dataset.route!==route;});
  document.querySelectorAll('[data-nav]').forEach(link=>{
-  if(link.dataset.nav===route)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
+  if(link.dataset.nav===(route==='stocks'?'import':route))link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
  });
  $('emptyTransactions').hidden=!!result;
  if(focus){
@@ -69,6 +70,7 @@ function discardPreview(){
  $('confirmExport').checked=false;exportsEnabled();
 }
 function clearAll(){
+ window.dispatchEvent(new Event('finance-clear-local'));
  run++;controller?.abort();controller=null;
  discardPreview();tableDraft=null;excelBook=null;$('excelSheet').replaceChildren();$('excelMapping').replaceChildren();$('excelHeader').replaceChildren();$('excelInfo').textContent='';seenFiles.clear();seenTransactions.clear();
  for(const id of sensitiveInputs)$(id).value='';
@@ -273,3 +275,5 @@ $('bank').addEventListener('change',()=>{clearAll();updateSource();$('order').va
 $('excelSheet').addEventListener('change',selectExcelSheet);$('excelHeader').addEventListener('change',fillExcelMapping);
 const cloud=initCloud({getPayload:()=>result&&importContext?{result,context:importContext,account:$('account').value.trim()}:null});
 updateSource();void start();
+
+initStocks(cloud);

@@ -4,3 +4,5 @@
 
 /* Login is an optional Google connection entry, not a private-site access gate. */
 .login-screen{max-width:540px;margin:2rem auto}.login-card h1{font-size:2rem;margin:.4rem 0 1rem}.login-card button,.login-card>a.button{display:block;width:100%;margin-top:12px;white-space:normal;overflow-wrap:anywhere;box-sizing:border-box;text-align:center}.login-card .inline{align-items:flex-start}.login-view .bottomnav{display:none}.login-view main{padding-bottom:1rem}#lastAccountHint{overflow-wrap:anywhere}@media(min-width:760px){.login-screen{margin:3rem auto}}
+
+.asset-chart{display:flex;align-items:center;flex-wrap:wrap;gap:1.5rem}.asset-chart svg{width:220px;max-width:100%;height:auto}.asset-chart ul{padding-left:1.4rem}#stockReport{white-space:pre-wrap;overflow-wrap:anywhere}#stockPreview .tablewrap{margin-bottom:1.5rem}
