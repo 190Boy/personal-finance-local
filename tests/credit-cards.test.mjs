@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {parseCsvText,readCardCsv,parseCardBook} from '../pdf-parser/credit-cards.mjs';
-import {makeCardImport,cardMeta,cardRowsToAppend,cardSummary,cardHistory,CARD_HEADERS} from '../cloud/credit-cards.mjs';
+import {makeCardImport,cardMeta,cardRowsToAppend,confirmedCardSummary as cardSummary,cardHistory,CARD_HEADERS} from '../cloud/credit-cards.mjs';
 const headers=['消費日','入帳起息日','摘要','幣別','消費地金額','外幣折算日','消費地','末四碼','新臺幣金額'];
 const row=(summary,amount)=>['2026/09/02','2026/09/03',summary,'','','','','9999',amount];
 const book=rows=>({sheets:[{name:'合成資料',rows:rows.map((cells,i)=>({cells,raw:cells,line:i+1}))}]});

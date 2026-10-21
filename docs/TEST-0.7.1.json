@@ -1,0 +1,32 @@
+{
+  "version": "0.7.1",
+  "date": "2026-10-21",
+  "unitTests": {
+    "passed": 128,
+    "failed": 0
+  },
+  "browser": "Windows Chrome",
+  "syntheticBrowser": {
+    "legacyMigration": "pass: cents to yuan once; headers and ID preserved; number format requests checked",
+    "homepage": "pass: latest bill month, consumption-only total, bank minus consumption estimate, month and date shown",
+    "creditImports": "pass: CSV/XLSX preview, consent, sync, repeated import and history",
+    "reloadLogout": "pass: no repeated conversion, unchanged row count, cleared homepage on logout",
+    "mobile": "390px width pass; screenshot reviewed",
+    "bank": "encrypted Excel/autosave/accounts/balance pass",
+    "stocks": "confirmation/inventory/chart/history pass"
+  },
+  "schemaSafety": {
+    "atomicFailureRollback": true,
+    "concurrentMigrationAndImport": true,
+    "oldClientWriteBarrier": true
+  },
+  "pwa": {
+    "version": "0.7.1",
+    "publicAssets": 227,
+    "sensitiveCaching": false
+  },
+  "liveGoogleSheets": "not tested; API mocks only",
+  "iPhoneSafari": "not tested",
+  "iPhoneHomeScreenPwa": "not tested",
+  "sourceFilesPublished": false
+}

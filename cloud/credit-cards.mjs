@@ -1,6 +1,17 @@
 import {hash} from './records.mjs';
 import {cardMoney,CARD_KINDS} from '../pdf-parser/credit-cards.mjs';
-export const CARD_HEADERS=['資料類型','紀錄ID','匯入ID','銀行','帳戶代稱','帳單月份','結帳日','繳款截止日','消費日','入帳日','摘要','臺幣金額分','種類','原幣幣別','原幣金額','帳單總額分','結帳後已繳金額分','確認狀態','匯入時間','繳款核對日','來源列'];
+export const LEGACY_CARD_HEADERS=['資料類型','紀錄ID','匯入ID','銀行','帳戶代稱','帳單月份','結帳日','繳款截止日','消費日','入帳日','摘要','臺幣金額分','種類','原幣幣別','原幣金額','帳單總額分','結帳後已繳金額分','確認狀態','匯入時間','繳款核對日','來源列'];
+export const CARD_HEADERS=LEGACY_CARD_HEADERS.map((v,i)=>({11:'臺幣金額（元）',15:'帳單總額（元）',16:'結帳後已繳金額（元）'}[i]||v));
+const moneyIndexes=[11,15,16];
+export function cardSheetRows(rows){return rows.map(r=>{const out=[...r];for(const i of moneyIndexes)if(out[i]!==''&&out[i]!=null){if(!Number.isSafeInteger(out[i]))throw Error('CARD_AMOUNT');out[i]/=100;if(cardMoney(out[i])!==r[i])throw Error('CARD_AMOUNT');}return out;});}
+export function cardTable(values){
+ if(!values.length)return {legacy:false,rows:[]};
+ const legacy=JSON.stringify(values[0])===JSON.stringify(LEGACY_CARD_HEADERS);
+ if(!legacy&&JSON.stringify(values[0])!==JSON.stringify(CARD_HEADERS))throw Error('SHEET_SCHEMA');
+ const rows=values.slice(1).map(r=>{const out=[...r];for(const i of moneyIndexes)if(out[i]!==''&&out[i]!=null){const n=legacy?out[i]:cardMoney(out[i]);if(!Number.isSafeInteger(n))throw Error('CARD_AMOUNT');out[i]=n;}return out;});
+ return {legacy,rows};
+}
+
 const validDate=s=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(s||''))return false;const d=new Date(s+'T00:00:00Z');return Number.isFinite(d.valueOf())&&d.toISOString().slice(0,10)===s;};
 export function cardMeta(input){
  const month=String(input.month||'');if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw Error('CARD_MONTH');
@@ -29,7 +40,7 @@ export function cardRowsToAppend(existing,incoming){
  const signature=r=>JSON.stringify(r[0]==='帳單'?[...r.slice(3,8),...r.slice(12,18),r[19]]:[r[3],r[4],...r.slice(8,15),String(r[17]||'').replace(/／相同紀錄內容衝突/g,'')]);
  const fresh=[];for(const r of incoming){const prior=groups.get(r[1])||[];if(prior.some(p=>signature(p)===signature(r)))continue;const row=[...r];if(prior.length)row[17]=[row[17],'相同紀錄內容衝突'].join('／');fresh.push(row);prior.push(row);groups.set(row[1],prior);}return fresh;
 }
-export function cardSummary(rows){
+export function confirmedCardSummary(rows){
  const groups=new Map(),accounts=[],pending=[];let totalCents=0;
  for(const r of rows){const key=JSON.stringify([r[3],r[4]]);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);}
  for(const all of groups.values()){
@@ -55,4 +66,29 @@ export function cardHistory(rows){
   if(list.length)for(const p of list)p.conflict=true;list.push(t);seen.set(key,list);entries.push(t);
  }
  return {rows:entries,duplicates};
+}
+
+// Latest bill month per bank/account; only explicit consumption is included.
+export function cardSummary(rows){
+ const groups=new Map(),accounts=[],pending=[];let totalCents=0;
+ for(const r of rows){const key=JSON.stringify([r[3],r[4]]);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);}
+ for(const all of groups.values()){
+  const sample=all[0],months=all.map(r=>String(r[5]||'')).filter(v=>/^\d{4}-(?:0[1-9]|1[0-2])$/.test(v)).sort(),month=months.at(-1);
+  if(!month){pending.push({bank:sample[3],account:sample[4],reason:'帳單月份無效，未列入'});continue;}
+  const current=all.filter(r=>r[5]===month),details=current.filter(r=>r[0]==='明細'),byId=new Map();let cents=0,consumptions=0,uncertain=0;const updated=[];
+  for(let n=0;n<details.length;n++){const r=details[n],id=r[1]||('missing-'+n),list=byId.get(id)||[];list.push(r);byId.set(id,list);}
+  for(const list of byId.values()){
+   const r=list[0],signatures=new Set(list.map(v=>JSON.stringify([v[11],v[12]])));
+   if(signatures.size!==1){uncertain++;continue;}
+   if(r[12]!=='消費')continue;
+   if(!Number.isSafeInteger(r[11])||r[11]<0){uncertain++;continue;}
+   cents+=r[11];if(!Number.isSafeInteger(cents))throw Error('AMOUNT_LIMIT');consumptions++;
+  }
+  for(const r of current)if(r[18])updated.push(String(r[18]));
+  if(!details.length){pending.push({bank:sample[3],account:sample[4],reason:month+' 尚無交易明細'});continue;}
+  if(uncertain)pending.push({bank:sample[3],account:sample[4],reason:month+' 有 '+uncertain+' 筆消費金額或分類衝突，未列入'});
+  if(all.some(r=>!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(String(r[5]||''))))pending.push({bank:sample[3],account:sample[4],reason:'另有月份無效資料，未列入'});
+  accounts.push({bank:sample[3],account:sample[4],month,cents,count:consumptions,asOf:updated.sort().at(-1)||''});totalCents+=cents;if(!Number.isSafeInteger(totalCents))throw Error('AMOUNT_LIMIT');
+ }
+ return {totalCents,accounts,pending,basis:'latest-month-consumption'};
 }
