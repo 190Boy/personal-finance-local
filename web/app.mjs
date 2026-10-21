@@ -29,14 +29,14 @@ let extractor=null,result=null,pages=null,busy=false,run=0,controller=null;
 let tableDraft=null,excelBook=null,importContext=null;
 const seenFiles=new Set(),seenTransactions=new Set(),urls=new Set();
 
-const routes=['login','home','transactions','import','stocks','settings'];
+const routes=['login','home','transactions','import','bank-import','stocks','settings'];
 function updateRoute(focus=false){
  const requested=location.hash.slice(1);
  const route=routes.includes(requested)?requested:'login';
  document.body.classList.toggle('login-view',route==='login');
  document.querySelectorAll('[data-route]').forEach(view=>{view.hidden=view.dataset.route!==route;});
  document.querySelectorAll('[data-nav]').forEach(link=>{
-  if(link.dataset.nav===(route==='stocks'?'import':route))link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
+  if(link.dataset.nav===(['stocks','bank-import'].includes(route)?'import':route))link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
  });
  $('emptyTransactions').hidden=!!result;
  if(focus){

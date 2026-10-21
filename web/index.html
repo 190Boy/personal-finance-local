@@ -16,8 +16,8 @@
 <link rel="stylesheet" href="./style.css">
 <script type="module" src="./app.mjs"></script>
 </head>
-<body><a class="skip" href="#main">跳至主要內容</a><header class="brandbar"><div class="wrap brand"><img src="./icons/icon-192.png" alt="" width="46" height="46"><div><strong>我的理財</strong><small>本機優先 · 銀行資料匯入測試</small></div><span class="version">v0.6.0</span></div></header><nav class="bottomnav" aria-label="主要導覽"><a href="#home" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/></svg><span>首頁</span></a><a href="#transactions" data-nav="transactions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v17H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>交易明細</span></a><a href="#import" data-nav="import"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4M12 18v-7m-3 3 3-3 3 3"/></svg><span>銀行匯入</span></a><a href="#settings" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3 6 0 1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z"/></svg><span>設定</span></a></nav><main id="main" class="wrap"><section id="view-login" data-route="login" class="login-screen"><div class="panel login-card"><p class="eyebrow">我的理財 · 個人資料自己保存</p><h1>歡迎回來</h1><p>連接自己的 Google 帳戶，載入銀行餘額與帳戶清單。</p><p id="lastAccountHint" class="muted"></p><label class="inline"><input id="rememberAccount" type="checkbox">在這台裝置記住帳號</label><p class="muted">只記住電子郵件，不保存 Google 授權憑證。共用裝置請勿勾選。</p><button id="loginGoogle" type="button" disabled>使用 Google 連接</button><button id="switchLoginAccount" type="button" class="secondary" disabled>使用其他 Google 帳號</button><p id="loginNotice" role="status" aria-live="polite">請連接 Google，或先使用本機匯入。</p><a class="button secondary" href="#home">先使用本機匯入</a><p class="muted">玉山 Excel／中信 PDF 與開啟密碼在裝置內處理。重新開啟後需點擊連接；Google 可能仍要求確認。</p></div></section><section id="view-home" data-route="home" hidden>
-<div class="hero"><p class="eyebrow">LOCAL FIRST · PRIVATE BY DESIGN</p><h1>把理財主導權，<br>留在自己手上。</h1><p>玉山讀取 Excel、中信解密 PDF；在本機解析，交易可記錄到自己的 Google 試算表。</p><a class="button" href="#import">開始測試銀行匯入</a></div>
+<body><a class="skip" href="#main">跳至主要內容</a><header class="brandbar"><div class="wrap brand"><img src="./icons/icon-192.png" alt="" width="46" height="46"><div><strong>我的理財</strong><small>本機優先 · 銀行資料匯入測試</small></div><span class="version">v0.6.1</span></div></header><nav class="bottomnav" aria-label="主要導覽"><a href="#home" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/></svg><span>首頁</span></a><a href="#transactions" data-nav="transactions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v17H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>交易明細</span></a><a href="#import" data-nav="import"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4M12 18v-7m-3 3 3-3 3 3"/></svg><span>匯入</span></a><a href="#settings" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3 6 0 1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z"/></svg><span>設定</span></a></nav><main id="main" class="wrap"><section id="view-login" data-route="login" class="login-screen"><div class="panel login-card"><p class="eyebrow">我的理財 · 個人資料自己保存</p><h1>歡迎回來</h1><p>連接自己的 Google 帳戶，載入銀行餘額與帳戶清單。</p><p id="lastAccountHint" class="muted"></p><label class="inline"><input id="rememberAccount" type="checkbox">在這台裝置記住帳號</label><p class="muted">只記住電子郵件，不保存 Google 授權憑證。共用裝置請勿勾選。</p><button id="loginGoogle" type="button" disabled>使用 Google 連接</button><button id="switchLoginAccount" type="button" class="secondary" disabled>使用其他 Google 帳號</button><p id="loginNotice" role="status" aria-live="polite">請連接 Google，或先使用本機匯入。</p><a class="button secondary" href="#home">先使用本機匯入</a><p class="muted">玉山 Excel／中信 PDF 與開啟密碼在裝置內處理。重新開啟後需點擊連接；Google 可能仍要求確認。</p></div></section><section id="view-home" data-route="home" hidden>
+<div class="hero"><p class="eyebrow">LOCAL FIRST · PRIVATE BY DESIGN</p><h1>把理財主導權，<br>留在自己手上。</h1><p>玉山讀取 Excel、中信解密 PDF；在本機解析，交易可記錄到自己的 Google 試算表。</p><a class="button" href="#import">開始匯入資料</a></div>
 <div class="summarygrid" aria-label="資產來源狀態">
 <div class="stat"><small>銀行存款</small><strong id="bankDeposit">尚未同步</strong></div><div class="stat"><small>股票資產</small><strong id="stockAssets">尚未同步</strong></div>
 <div class="stat"><small>信用卡負債</small><strong>尚未同步</strong></div><div class="stat"><small>淨資產</small><strong>尚未計算</strong></div>
@@ -26,7 +26,7 @@
 <section class="panel"><h2>股票資產與來源日期</h2><p id="stockAssetDetail"></p><a class="button" href="#stocks">匯入股票 PDF</a></section><section class="panel"><h2>已載入資產占比</h2><div class="asset-chart"><div id="assetPie"></div><ul id="assetLegend"></ul></div><p id="assetChartNotice"></p></section><section class="panel"><h2>先讓每一筆資料正確</h2><p id="homePreview">尚無本次預覽資料。</p><p class="muted">這些狀態不代表你的實際資產為零。此版不連線銀行、不寫入帳務，也不將舊資料標示為即時餘額。</p>
 <ol class="steps"><li>玉山選 Excel；中信選 PDF 後輸入密碼。</li><li>確認日期、時間、摘要、支出、收入與餘額。</li><li>比對原檔後，自行匯出核對用 CSV／JSON。</li></ol></section>
 <section class="panel"><h2>你的主畫面理財工具</h2><p>手機可加入主畫面，桌面也能使用同一套功能與解析邏輯。離線保存公開程式；重新連接 Google 後可載入雲端餘額。</p><a href="#settings">查看安裝與隱私設定</a></section>
-</section><section id="view-stocks" data-route="stocks" class="panel" hidden>
+</section><section id="view-import-hub" data-route="import" class="panel" hidden><h1>匯入資料</h1><p>先選擇資料種類，再使用既有匯入功能。</p><div class="import-options"><a class="button" href="#bank-import">銀行存款<br><small>中信 PDF／玉山 Excel</small></a><a class="button secondary" href="#stocks">股票資產<br><small>證券庫存／股數異動 PDF</small></a></div><p class="muted">原始文件與開啟密碼在本機處理。銀行自動儲存與股票人工確認流程維持原狀。</p></section><section id="view-stocks" data-route="stocks" class="panel" hidden>
 <div class="sectionhead"><h1>股票資產匯入</h1><span class="pill">中國信託證券／集保存摺</span></div>
 <p>在本機解密庫存與登摺 PDF；只把你確認的結構化資料存進自己的試算表。原始 PDF、密碼與原始帳號不會上傳。</p>
 <form id="stockForm"><div class="grid">
@@ -41,7 +41,7 @@
 <label class="inline"><input id="stockConfirmed" type="checkbox">我已比對原檔、股數、市值、日期及帳戶；兩份文件屬於同一帳戶，並同意將預覽資料儲存到自己的 Google 試算表</label>
 <div class="actions"><button id="stockSave" type="button" disabled>確認並同步股票到雲端</button><button id="stockExport" type="button" class="secondary" disabled>匯出預覽 JSON</button></div>
 <p class="muted">請先在設定連接 Google。股票使用獨立工作表；首頁只計算最新完整庫存快照，重複匯入不累加持股。只有庫存報表時可核對市值算術，但無法核對異動歷史。</p>
-<a href="#import">返回銀行匯入</a></section><section id="view-import" data-route="import" class="panel" hidden>
+<a href="#import">返回銀行匯入</a></section><section id="view-import" data-route="bank-import" class="panel" hidden>
 <div class="sectionhead"><h2>銀行資料匯入</h2><span class="pill">實驗版／待真實樣本驗收</span></div>
 <p class="muted">這是解析測試工具，沒有入帳功能。銀行格式、字型或跨頁方式不同時，可能需要調整欄位位置。</p>
 <p><a class="button secondary" href="#stocks">股票庫存／股數異動匯入</a></p><form id="pdfForm">
@@ -70,8 +70,13 @@
 </form>
 <p id="status" role="status" aria-live="polite">正在載入本機 PDF.js…</p>
 </section>
-<section id="view-transactions" data-route="transactions" hidden><h1 class="route-title">交易明細</h1><div id="emptyTransactions" class="panel empty"><p>尚無本次匯入預覽。資料不會在重新開啟後保留。</p><a class="button" href="#import">選擇銀行檔案</a></div><section id="resultPanel" class="panel" hidden>
-<div class="sectionhead"><h2>02 預覽與核對</h2><span class="pill">尚未入帳</span></div>
+<section id="view-transactions" data-route="transactions" hidden><h1 class="route-title">交易明細</h1><section class="panel" id="historyPanel"><div class="sectionhead"><h2>雲端歷史交易</h2><a href="#settings">連接／重新載入 Google</a></div>
+<div class="grid"><label>類別<select id="historyKind"><option value="">全部類別</option><option>銀行存款</option><option>股票股數</option></select></label><label>帳戶<select id="historyAccount"><option value="">全部帳戶</option></select></label>
+<label>搜尋摘要／來源／代號<input id="historyQuery" type="search" autocomplete="off"></label><label>開始日期<input id="historyFrom" type="date"></label><label>結束日期<input id="historyTo" type="date"></label></div>
+<button id="historyReset" type="button" class="secondary">清除篩選</button><p id="historyCount" role="status"></p>
+<div class="tablewrap" tabindex="0" role="region" aria-label="雲端歷史交易，可水平捲動"><table><thead><tr><th>類別</th><th>來源</th><th>帳戶</th><th>日期</th><th>時間</th><th>摘要／證券</th><th>支出／提出</th><th>收入／存入</th><th>手續費</th><th>餘額／結存</th><th>單位</th><th>核對資訊</th></tr></thead><tbody id="historyRows"></tbody></table></div><button id="historyMore" type="button" class="secondary" hidden>再顯示 100 筆</button>
+<p class="muted">每個來源工作表最多讀取 100,000 列；超過上限會明確報錯，不把截斷資料當成完整歷史。歷史只存本次頁面記憶體，登出與離開清除。</p></section><div id="emptyTransactions" class="panel empty"><p>尚無本次匯入預覽。已儲存的資料請查看上方雲端歷史交易。</p><a class="button" href="#import">選擇銀行檔案</a></div><section id="resultPanel" class="panel" hidden>
+<div class="sectionhead"><h2>本次匯入預覽與核對</h2><span class="pill">尚未入帳</span></div>
 <p id="resultSummary"></p><p id="validation" class="notice"></p>
 <div id="mobileRows" class="mobile-transactions" aria-label="交易卡片"></div>
 <div class="tablewrap" tabindex="0" role="region" aria-label="交易預覽，可水平捲動">
@@ -92,7 +97,7 @@
 <p class="installnote"><strong>Android／Windows Chrome：</strong>可使用瀏覽器的安裝選項；瀏覽器提供安裝提示時，也會顯示上方按鈕。</p>
 <p class="muted">第一次準備離線資源需要連線。系統可能回收網站儲存空間，因此離線可用性仍須在你的裝置驗證。</p></section>
 <section class="panel"><h2>Google 帳戶與同步</h2><p><a href="#login">返回登入入口</a></p><button id="forgetAccount" type="button" class="secondary">忘記這台裝置記住的帳號</button>
-<p>連接後，自動建立或開啟你 Drive 裡的「我的理財紀錄」。銀行存款共用一頁，以銀行、帳戶代稱區分；另有匯入紀錄頁。股票確認後另存股票快照、股票庫存、股票異動與股票匯入紀錄。</p>
+<p>連接後，自動建立或開啟你 Drive 裡的「我的理財紀錄」。銀行存款共用一頁，以銀行、帳戶代稱區分；另有匯入紀錄頁。股票確認後另存股票快照、股票庫存與股票異動；銀行及股票的匯入紀錄統整於「匯入紀錄」，以類別區分。</p>
 <p>直接連接你自己的 Google 帳號；每位用戶的試算表都保存在各自的 Drive。</p>
 <div id="googleAccount" class="google-account" hidden><div class="google-avatar"><img id="googleAvatar" width="52" height="52" alt="Google 帳戶頭像" referrerpolicy="no-referrer" hidden><span id="googleAvatarFallback" aria-hidden="true">G</span></div><div class="google-account-text"><strong id="googleAccountName"></strong><span id="googleAccountEmail"></span><small>已登入 Google</small></div></div>
 <div class="actions"><button id="connectGoogle" type="button">連接 Google</button><button id="refreshCloud" type="button" class="secondary">重新載入雲端餘額</button></div>

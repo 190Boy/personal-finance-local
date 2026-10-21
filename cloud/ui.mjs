@@ -1,3 +1,4 @@
+import {initHistory,renderHistory,clearHistory} from '../web/history.mjs';
 import {renderAssets} from '../web/assets.mjs';
 import {makeStockImport} from './stocks.mjs';
 import {rememberedAccount,rememberAccount} from './login-preferences.mjs';
@@ -45,18 +46,18 @@ function showAccount(){
  clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>logout('Google 授權已過期，請重新連接。',{clearPreview:false}),Math.max(0,store.expires-Date.now()));
 }
 function clearSummary(){
- accountChoices?.clear();renderAssets(null);
+ accountChoices?.clear();renderAssets(null);clearHistory();
  $('bankDeposit').textContent='尚未同步';$('bankDepositDetail').textContent='連接 Google 後載入各帳戶最後餘額。';$('cloudSheetLink').hidden=true;
 }
 async function summary(){
- const result=await store.summary();renderAssets(result);
+ const result=await store.summary();renderAssets(result);renderHistory(result.history);
  accountChoices?.update(result.accounts||{});
  $('bankDeposit').textContent=result.balances.length?(result.pending.length?'部分合計 NT$ ':'NT$ ')+(result.totalCents/100).toLocaleString('zh-TW',{minimumFractionDigits:2,maximumFractionDigits:2}):'尚無可核對餘額';
  $('bankDepositDetail').textContent=(result.balances.length?result.balances.map(b=>b.bank+'／'+b.account+'：'+(b.cents/100).toLocaleString('zh-TW')+'（'+b.date+'）').join('；'):'尚無已儲存的銀行明細。')+(result.pending.length?'；'+result.pending.length+' 個帳戶餘額或交易先後待確認，未列入合計。':'')+' 此為匯入明細最後餘額，非銀行即時餘額。';
  $('cloudSheetLink').href=store.file.webViewLink||'https://docs.google.com/spreadsheets/d/'+encodeURIComponent(store.file.id)+'/edit';$('cloudSheetLink').hidden=false;
 }
 export function initCloud({getPayload}){
- accountChoices=initAccounts();remembered=rememberedAccount(browserStorage());rememberChoice=!!remembered;
+ initHistory();accountChoices=initAccounts();remembered=rememberedAccount(browserStorage());rememberChoice=!!remembered;
  // Remove the obsolete per-user public ID setting; credentials remain memory-only.
  try{localStorage.removeItem('finance-google-client-id');}catch{}
  clearSummary();controls();

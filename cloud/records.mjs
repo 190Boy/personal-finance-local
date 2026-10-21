@@ -1,5 +1,5 @@
 export const HEADERS=['紀錄 ID','銀行','帳戶代稱','日期','時間','摘要','支出（元）','收入（元）','手續費（元）','餘額（元）','餘額核對','待核對原因','來源格式','匯入 ID','原始順序','寫入時間','類別','來源列','手續費規則'];
-export const IMPORT_HEADERS=['匯入 ID','銀行','帳戶代稱','類別','寫入時間','來源筆數','新增筆數'];
+export const IMPORT_HEADERS=['匯入 ID','來源','帳戶代稱','類別','寫入時間','來源筆數','新增筆數','庫存檔指紋','異動檔指紋','核對狀態'];
 export const BANK_TABS=['銀行存款'];
 const cents=v=>v===''||v==null?null:Number.isFinite(Number(v))&&Number.isSafeInteger(Math.round(Number(v)*100))?Math.round(Number(v)*100):null;
 const yuan=v=>Number.isSafeInteger(v)?v/100:'';

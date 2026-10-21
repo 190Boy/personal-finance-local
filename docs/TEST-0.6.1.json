@@ -1,0 +1,31 @@
+{
+  "version": "0.6.1",
+  "date": "2026-10-21",
+  "unitTests": {
+    "pass": 37,
+    "fail": 0
+  },
+  "loginMockCases": 10,
+  "bankImportRegression": "pass",
+  "stockImportSharedLedger": "pass",
+  "historyBrowser": {
+    "pass": true,
+    "rows": 207,
+    "checks": [
+      "legacy migration and hiding without deleting",
+      "retry migration idempotence",
+      "pending/conflicts retained",
+      "exact ID duplicates display merge",
+      "category/account/query/date filters",
+      "incremental 100-row display",
+      "reload and reauthorize history",
+      "logout clearing",
+      "import chooser and unchanged bank form",
+      "mobile width"
+    ]
+  },
+  "realGoogleSheets": "not tested",
+  "iphoneSafari": "not tested",
+  "android": "not tested",
+  "strictConcurrentWriteDedup": "proposal only; not implemented"
+}

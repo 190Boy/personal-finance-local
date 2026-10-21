@@ -46,5 +46,6 @@ test('allowlist contains no sensitive formats, APIs or user data stores',()=>{
 test('known client routes work offline without caching arbitrary OAuth fragments',()=>{
  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#transactions'),true);
  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#stocks'),true);
+ assert.equal(accepts('https://example.github.io/personal-finance-local/web/#bank-import'),true);
  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#access_token=synthetic'),false);
 });

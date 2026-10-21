@@ -1,3 +1,5 @@
+import {ledgerPlan,migrationId} from './ledger.mjs';
+import {cloudHistory} from './history.mjs';
 import {STOCK_SCHEMAS,stockSummary} from './stocks.mjs';
 import {savedAccounts} from './accounts.mjs';
 import {HEADERS,IMPORT_HEADERS,BANK_TABS,bankSummary} from './records.mjs';
@@ -41,11 +43,30 @@ export class GoogleStore{
   const data=await this.api(SHEETS+'/'+this.file.id+'/values/'+encodeURIComponent("'"+tab+"'!A:S")+'?valueRenderOption=UNFORMATTED_VALUE');
   const rows=data.values||[];if(rows.length>100001)throw Error('CLOUD_ROW_LIMIT');return rows;
  }
- async summary(){let rows=[];for(const tab of BANK_TABS){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(HEADERS))throw Error('SHEET_SCHEMA');rows.push(...values.slice(1));}const stockTables={};for(const tab of ['股票快照','股票庫存']){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(STOCK_SCHEMAS[tab]))throw Error('SHEET_SCHEMA');stockTables[tab]=values.slice(1);}return {...bankSummary(rows),accounts:savedAccounts(rows),stocks:stockSummary(stockTables)};}
+
+ async unifiedLog(){
+  if(!this.sheets.some(s=>s.title==='匯入紀錄'))await this.ensure('匯入紀錄',IMPORT_HEADERS);
+  let current=await this.read('匯入紀錄');
+  if(!current.length){await this.ensure('匯入紀錄',IMPORT_HEADERS);current=await this.read('匯入紀錄');}
+  const legacy=await this.read('股票匯入紀錄'),plan=ledgerPlan(current,legacy),oldSheet=this.sheets.find(s=>s.title==='股票匯入紀錄');
+  const hide=oldSheet&&!oldSheet.hidden;
+  if(!plan.rewriteHeader&&!plan.rows.length&&!hide)return this.sheets.find(s=>s.title==='匯入紀錄');
+  const sheet=this.sheets.find(s=>s.title==='匯入紀錄'),fileId=this.file.id;
+  const requests=[{createDeveloperMetadata:{developerMetadata:{metadataId:await migrationId(fileId,{...plan,hide:!!hide}),metadataKey:'financeUnifiedLog',metadataValue:'v1',visibility:'DOCUMENT',location:{spreadsheet:true}}}}];
+  if(plan.rewriteHeader)requests.push({updateCells:{range:{sheetId:sheet.sheetId,startRowIndex:0,endRowIndex:1,startColumnIndex:0,endColumnIndex:IMPORT_HEADERS.length},rows:cells([IMPORT_HEADERS]),fields:'userEnteredValue'}});
+  if(plan.rows.length)requests.push({appendCells:{sheetId:sheet.sheetId,rows:cells(plan.rows),fields:'userEnteredValue'}});
+  if(hide)requests.push({updateSheetProperties:{properties:{sheetId:oldSheet.sheetId,hidden:true},fields:'hidden'}});
+  try{await this.api(SHEETS+'/'+fileId+':batchUpdate',{method:'POST',body:{requests}});}
+  catch(error){const check=ledgerPlan(await this.read('匯入紀錄'),legacy);if(check.rewriteHeader||check.rows.length)throw error;}
+  await this.metadata();return this.sheets.find(s=>s.title==='匯入紀錄');
+ }
+
+ async summary(){await this.unifiedLog();let rows=[];for(const tab of BANK_TABS){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(HEADERS))throw Error('SHEET_SCHEMA');rows.push(...values.slice(1));}const stockTables={};for(const tab of ['股票快照','股票庫存']){const values=await this.read(tab);if(values.length&&JSON.stringify(values[0])!==JSON.stringify(STOCK_SCHEMAS[tab]))throw Error('SHEET_SCHEMA');stockTables[tab]=values.slice(1);}return {...bankSummary(rows),accounts:savedAccounts(rows),stocks:stockSummary(stockTables),history:cloudHistory(rows,await this.stockMovements())};}
+ async stockMovements(){const values=await this.read('股票異動');if(values.length&&JSON.stringify(values[0])!==JSON.stringify(STOCK_SCHEMAS['股票異動']))throw Error('SHEET_SCHEMA');return values.slice(1);}
  async save(batch){
   if(this.saving)throw Error('SYNC_BUSY');this.saving=true;const epoch=this.epoch,fileId=this.file?.id;
   try{
-   const sheet=await this.ensure(batch.tab,HEADERS),logSheet=await this.ensure('匯入紀錄',IMPORT_HEADERS);
+   const logSheet=await this.unifiedLog(),sheet=await this.ensure(batch.tab,HEADERS);
    let logs=(await this.read('匯入紀錄')).slice(1);if(logs.some(row=>row[0]===batch.id))return {added:0,repeated:true};
    const all=[];for(const tab of BANK_TABS)all.push(...(await this.read(tab)).slice(1));
    const existing=new Set(all.map(row=>row[0])),fresh=batch.rows.filter(row=>!existing.has(row[0]));
@@ -66,23 +87,26 @@ export class GoogleStore{
   if(this.saving)throw Error('SYNC_BUSY');this.saving=true;
   const epoch=this.epoch,fileId=this.file?.id;
   try{
-   const sheets={};
+   const logSheet=await this.unifiedLog(),sheets={};
    for(const [tab,headers] of Object.entries(STOCK_SCHEMAS))sheets[tab]=await this.ensure(tab,headers);
-   const logs=(await this.read('股票匯入紀錄')).slice(1);
+   const logs=(await this.read('匯入紀錄')).slice(1);
    if(logs.some(r=>r[0]===batch.id))return {repeated:true};
    const existingSnapshots=(await this.read('股票快照')).slice(1),existingMoves=new Set((await this.read('股票異動')).slice(1).map(r=>r[0]));
    const hasSnapshot=existingSnapshots.some(r=>r[0]===batch.snapshotId);
    const requests=[{createDeveloperMetadata:{developerMetadata:{metadataId:parseInt(batch.id.slice(0,7),16)+1,metadataKey:'financeStockImport',metadataValue:batch.id,visibility:'DOCUMENT',location:{spreadsheet:true}}}}];
    if(!hasSnapshot)requests.push({createDeveloperMetadata:{developerMetadata:{metadataId:parseInt(batch.snapshotId.slice(0,7),16)+1,metadataKey:'financeStockSnapshot',metadataValue:batch.snapshotId,visibility:'DOCUMENT',location:{spreadsheet:true}}}});
+   let added=0;
    for(const [tab,input] of Object.entries(batch.tables)){
     let rows=input;
     if(hasSnapshot&&['股票快照','股票庫存'].includes(tab))rows=[];
     if(tab==='股票異動')rows=rows.filter(r=>!existingMoves.has(r[0]));
+    if(['股票庫存','股票異動'].includes(tab))added+=rows.length;
     if(rows.length)requests.push({appendCells:{sheetId:sheets[tab].sheetId,rows:cells(rows),fields:'userEnteredValue'}});
    }
+   const log=[...batch.log];log[6]=added;requests.push({appendCells:{sheetId:logSheet.sheetId,rows:cells([log]),fields:'userEnteredValue'}});
    if(epoch!==this.epoch||fileId!==this.file?.id)throw Error('GOOGLE_LOGIN_REQUIRED');
    try{await this.api(SHEETS+'/'+fileId+':batchUpdate',{method:'POST',body:{requests}});}
-   catch(e){if((await this.read('股票匯入紀錄')).slice(1).some(r=>r[0]===batch.id))return {repeated:true};throw e;}
+   catch(e){if((await this.read('匯入紀錄')).slice(1).some(r=>r[0]===batch.id))return {repeated:true};throw e;}
    return {repeated:false};
   }finally{this.saving=false;}
  }

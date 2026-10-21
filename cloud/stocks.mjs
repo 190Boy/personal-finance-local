@@ -2,8 +2,7 @@ import {hash} from './records.mjs';
 export const STOCK_SCHEMAS={
  '股票快照':['快照ID','券商','帳戶代稱','報表產製時間','幣別','持股筆數','市值分','內容指紋','匯入時間'],
  '股票庫存':['快照ID','證券代號','證券名稱','股數','幣別','收盤價','價格日期','市值分'],
- '股票異動':['異動ID','券商','帳戶代稱','日期','證券代號','證券名稱','摘要','提出股數','存入股數','結存股數'],
- '股票匯入紀錄':['匯入ID','券商','帳戶代稱','匯入時間','庫存檔指紋','異動檔指紋','核對狀態']
+ '股票異動':['異動ID','券商','帳戶代稱','日期','證券代號','證券名稱','摘要','提出股數','存入股數','結存股數']
 };
 export async function makeStockImport({snapshot,history,reconciliation,account,fileHashes}){
  account=String(account||'').trim();
@@ -22,11 +21,10 @@ export async function makeStockImport({snapshot,history,reconciliation,account,f
  }
  const total=positions.reduce((sum,h)=>sum+h.marketValueCents,0);
  if(!Number.isSafeInteger(total)||total<0)throw Error('STOCK_INVALID');
- return {id,snapshotId,tables:{
+ return {id,snapshotId,log:[id,broker,account,'股票資產',now,positions.length+movements.length,0,fileHashes?.holdings||'',fileHashes?.movements||'',history?'股數連續及庫存交叉核對通過；人工確認':'僅庫存算術檢查通過；人工確認'],tables:{
   '股票快照':[[snapshotId,broker,account,snapshot.asOf,'TWD',positions.length,total,fingerprint,now]],
   '股票庫存':positions.map(h=>[snapshotId,h.code,h.name,h.quantity,h.currency,h.close,h.priceDate,h.marketValueCents]),
-  '股票異動':movements,
-  '股票匯入紀錄':[[id,broker,account,now,fileHashes?.holdings||'',fileHashes?.movements||'',history?'股數連續及庫存交叉核對通過；人工確認':'僅庫存算術檢查通過；人工確認']]
+  '股票異動':movements
  }};
 }
 export function stockSummary(tables){
