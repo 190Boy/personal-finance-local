@@ -13,6 +13,13 @@ const readReason=e=>({CARD_AMOUNT:'信用卡金額或單位無法安全辨識，
 const cardFormats=sheetId=>[11,15,16].map(i=>({repeatCell:{range:{sheetId,startRowIndex:1,startColumnIndex:i,endColumnIndex:i+1},cell:{userEnteredFormat:{numberFormat:{type:'NUMBER',pattern:'#,##0.00'}}},fields:'userEnteredFormat.numberFormat'}}));
 const CARD_UNITS_GUARD={metadataId:2000000000,metadataKey:'fw2',metadataValue:'cards-yuan-v1',visibility:'DOCUMENT',location:{spreadsheet:true}};
 const cells=rows=>rows.map(row=>({values:row.map(value=>({userEnteredValue:literal(value)}))}));
+// Spreadsheet developer metadata is size-capped, so coordination markers must not grow forever.
+// The newest KEEP_REVISIONS revision markers are kept: a writer that read revision R can only be wrongly
+// accepted if marker R+1 was created and later deleted, which needs KEEP_REVISIONS writes during one attempt.
+const KEEP_REVISIONS=20,PRUNE_LIMIT=1000,METADATA_BUDGET=28000;
+// Per-import markers written up to v0.7.1; the revision marker already serializes every writer.
+const LEGACY_IMPORT_KEYS=new Set(['financeImport','financeStockImport','financeStockSnapshot']);
+const metadataSize=m=>(m.metadataKey||'').length+(m.metadataValue||'').length;
 export class GoogleStore{
  constructor({fetcher=(...args)=>globalThis.fetch(...args)}={}){this.fetcher=fetcher;this.token='';this.expires=0;this.file=null;this.sheets=[];this.user=null;this.saving=false;this.epoch=0;}
  authorize(token,expires){this.disconnect();this.token=token;this.expires=Date.now()+Math.max(0,Number(expires)-30)*1000;}
@@ -90,9 +97,8 @@ export class GoogleStore{
    const {fresh}=rowsToAppend(all,batch.rows);
    const log=[...batch.log];log[6]=fresh.length;
    // One atomic batch: rows and import ledger succeed or fail together.
-   // A deterministic metadata ID rejects concurrent writes of the same import.
-   const metadataId=parseInt(batch.id.slice(0,7),16)+1;
-   const requests=[this.revisionRequest(revision),{createDeveloperMetadata:{developerMetadata:{metadataId,metadataKey:'financeImport',metadataValue:batch.id,visibility:'DOCUMENT',location:{spreadsheet:true}}}},
+   // The revision marker rejects a concurrent write of the same import; the retry then finds its ledger row.
+   const requests=[...this.revisionRequests(revision),
     ...(fresh.length?[{appendCells:{sheetId:sheet.sheetId,rows:cells(fresh),fields:'userEnteredValue'}}]:[]),
     {appendCells:{sheetId:logSheet.sheetId,rows:cells([log]),fields:'userEnteredValue'}}];
    if(epoch!==this.epoch||fileId!==this.file?.id)throw Error('GOOGLE_LOGIN_REQUIRED');
@@ -109,8 +115,8 @@ export class GoogleStore{
    if(logs.some(r=>r[0]===batch.id))return {repeated:true};
    const existingSnapshots=(await this.read('股票庫存')).slice(1),existingMoves=(await this.read('股票異動')).slice(1);
    const hasSnapshot=existingSnapshots.some(r=>r[1]===batch.snapshotId&&['快照','空庫存'].includes(r[0]));
-   const requests=[this.revisionRequest(revision),{createDeveloperMetadata:{developerMetadata:{metadataId:parseInt(batch.id.slice(0,7),16)+1,metadataKey:'financeStockImport',metadataValue:batch.id,visibility:'DOCUMENT',location:{spreadsheet:true}}}}];
-   if(!hasSnapshot)requests.push({createDeveloperMetadata:{developerMetadata:{metadataId:parseInt(batch.snapshotId.slice(0,7),16)+1,metadataKey:'financeStockSnapshot',metadataValue:batch.snapshotId,visibility:'DOCUMENT',location:{spreadsheet:true}}}});
+   // The revision marker serializes concurrent imports; a retry re-reads the ledger and snapshot rows.
+   const requests=[...this.revisionRequests(revision)];
    let added=0;
    for(const [tab,input] of Object.entries(batch.tables)){
     let rows=input;
@@ -142,19 +148,29 @@ export class GoogleStore{
  }
  async writeRevision(){
   const data=await this.api(SHEETS+'/'+this.file.id+'?fields=developerMetadata(metadataId,metadataKey,metadataValue,location)');
-  const entries=data.developerMetadata||[];
-  if(entries.filter(m=>m.location?.spreadsheet).reduce((s,m)=>s+(m.metadataKey||'').length+(m.metadataValue||'').length,0)>28000)throw Error('SYNC_METADATA_LIMIT');
-  let revision=0;this.cardUnitsGuard=false;
-  for(const m of entries)if(m.metadataKey==='fw2'){
+  const all=data.developerMetadata||[],entries=all.filter(m=>m.location?.spreadsheet);
+  let revision=0;this.cardUnitsGuard=false;this.prune=null;const markers=[];
+  for(const m of all)if(m.metadataKey==='fw2'){
    // An explicit schema barrier makes pre-yuan clients refuse stale writes.
    if(m.metadataId===CARD_UNITS_GUARD.metadataId&&m.metadataValue===CARD_UNITS_GUARD.metadataValue){this.cardUnitsGuard=true;continue;}
    const value=Number(m.metadataValue);
    if(!Number.isSafeInteger(value)||value<1||m.metadataId!==1000000000+value)throw Error('SYNC_REVISION_INVALID');
-   revision=Math.max(revision,value);
+   revision=Math.max(revision,value);markers.push({id:m.metadataId,value});
   }
+  // Only markers observed in this read are deleted, and only inside the next revision batch:
+  // if another writer removed one meanwhile, it also took this revision and the batch is rejected anyway.
+  const stale=new Set(markers.filter(m=>m.value<=revision+1-KEEP_REVISIONS).map(m=>m.id));
+  const ids=all.filter(m=>stale.has(m.metadataId)||LEGACY_IMPORT_KEYS.has(m.metadataKey)).map(m=>m.metadataId).slice(0,PRUNE_LIMIT),removing=new Set(ids);
+  // Budget what remains after this write's cleanup, so a store already at the cap can still recover.
+  if(entries.filter(m=>!removing.has(m.metadataId)).reduce((s,m)=>s+metadataSize(m),0)>METADATA_BUDGET)throw Error('SYNC_METADATA_LIMIT');
+  this.prune={revision,ids};
   return revision;
  }
- revisionRequest(revision){return {createDeveloperMetadata:{developerMetadata:{metadataId:1000000001+revision,metadataKey:'fw2',metadataValue:String(revision+1),visibility:'DOCUMENT',location:{spreadsheet:true}}}};}
+ revisionRequests(revision){
+  const ids=this.prune?.revision===revision?this.prune.ids:[];
+  return [{createDeveloperMetadata:{developerMetadata:{metadataId:1000000001+revision,metadataKey:'fw2',metadataValue:String(revision+1),visibility:'DOCUMENT',location:{spreadsheet:true}}}},
+   ...ids.map(metadataId=>({deleteDeveloperMetadata:{dataFilter:{developerMetadataLookup:{metadataId}}}}))];
+ }
  async coordinated(write){
   for(let attempt=0;attempt<4;attempt++){
    // Read revision before reading IDs. An atomic unique marker rejects stale writers.
@@ -185,7 +201,7 @@ export class GoogleStore{
    const values=await this.read('信用卡'),plan=cardTable(values);if(!plan.legacy&&this.cardUnitsGuard)return;
    const sheetId=this.sheets.find(s=>s.title==='信用卡').sheetId;
    // Header, values and display format migrate together; revision rejects stale writers.
-   const requests=[this.revisionRequest(revision),...(!this.cardUnitsGuard?[{createDeveloperMetadata:{developerMetadata:CARD_UNITS_GUARD}}]:[]),...(plan.legacy?[{updateCells:{range:{sheetId,startRowIndex:0,endRowIndex:values.length,startColumnIndex:0,endColumnIndex:CARD_HEADERS.length},rows:cells([CARD_HEADERS,...cardSheetRows(plan.rows)]),fields:'userEnteredValue'}}]:[]),...cardFormats(sheetId)];
+   const requests=[...this.revisionRequests(revision),...(!this.cardUnitsGuard?[{createDeveloperMetadata:{developerMetadata:CARD_UNITS_GUARD}}]:[]),...(plan.legacy?[{updateCells:{range:{sheetId,startRowIndex:0,endRowIndex:values.length,startColumnIndex:0,endColumnIndex:CARD_HEADERS.length},rows:cells([CARD_HEADERS,...cardSheetRows(plan.rows)]),fields:'userEnteredValue'}}]:[]),...cardFormats(sheetId)];
    try{await this.api(SHEETS+'/'+this.file.id+':batchUpdate',{method:'POST',body:{requests}});}catch(error){if(cardTable(await this.read('信用卡')).legacy)throw error;await this.writeRevision();if(!this.cardUnitsGuard)throw error;}
   });
  }
@@ -197,7 +213,7 @@ export class GoogleStore{
    const epoch=this.epoch,fileId=this.file?.id,logs=(await this.read('匯入紀錄')).slice(1);
    if(logs.some(r=>r[0]===batch.id))return {repeated:true,added:0};
    const fresh=cardRowsToAppend(cardTable(await this.read('信用卡')).rows,batch.rows),log=[...batch.log];log[6]=fresh.filter(r=>r[0]==='明細').length;
-   const requests=[this.revisionRequest(revision),...cardFormats(this.sheets.find(s=>s.title==='信用卡').sheetId),...(fresh.length?[{appendCells:{sheetId:this.sheets.find(s=>s.title==='信用卡').sheetId,rows:cells(cardSheetRows(fresh)),fields:'userEnteredValue'}}]:[]),{appendCells:{sheetId:this.sheets.find(s=>s.title==='匯入紀錄').sheetId,rows:cells([log]),fields:'userEnteredValue'}}];
+   const requests=[...this.revisionRequests(revision),...cardFormats(this.sheets.find(s=>s.title==='信用卡').sheetId),...(fresh.length?[{appendCells:{sheetId:this.sheets.find(s=>s.title==='信用卡').sheetId,rows:cells(cardSheetRows(fresh)),fields:'userEnteredValue'}}]:[]),{appendCells:{sheetId:this.sheets.find(s=>s.title==='匯入紀錄').sheetId,rows:cells([log]),fields:'userEnteredValue'}}];
    if(epoch!==this.epoch||fileId!==this.file?.id)throw Error('GOOGLE_LOGIN_REQUIRED');
    try{await this.api(SHEETS+'/'+fileId+':batchUpdate',{method:'POST',body:{requests}});}catch(e){if((await this.read('匯入紀錄')).slice(1).some(r=>r[0]===batch.id))return {repeated:true,added:0};throw e;}
    return {repeated:false,added:log[6]};

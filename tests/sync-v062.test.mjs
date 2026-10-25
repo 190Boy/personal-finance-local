@@ -24,8 +24,10 @@ function mock({barrier=false,lost=false,failure=false,tables:extra={}}={}){
    const requests=JSON.parse(opt.body).requests;writeCalls++;
    if(failure)return {ok:false,status:503};
    const ids=new Set(metadata.map(m=>m.metadataId));for(const r of requests)if(r.createDeveloperMetadata){const id=r.createDeveloperMetadata.developerMetadata.metadataId;if(ids.has(id)){collisions++;return {ok:false,status:400};}ids.add(id);}
+   for(const r of requests)if(r.deleteDeveloperMetadata&&!ids.has(r.deleteDeveloperMetadata.dataFilter.developerMetadataLookup.metadataId))return {ok:false,status:400};
    for(const r of requests){
     if(r.createDeveloperMetadata)metadata.push(clone(r.createDeveloperMetadata.developerMetadata));
+    if(r.deleteDeveloperMetadata){const id=r.deleteDeveloperMetadata.dataFilter.developerMetadataLookup.metadataId;metadata.splice(0,metadata.length,...metadata.filter(m=>m.metadataId!==id));}
     if(r.appendCells){const tab=sheets.find(s=>s.sheetId===r.appendCells.sheetId).title;tables[tab].push(...decode(r.appendCells.rows));}
     if(r.updateCells){const tab=sheets.find(s=>s.sheetId===r.updateCells.range.sheetId).title;const data=decode(r.updateCells.rows);tables[tab]=[...data,...tables[tab].slice(r.updateCells.range.endRowIndex)];}
     if(r.updateSheetProperties)Object.assign(sheets.find(s=>s.sheetId===r.updateSheetProperties.properties.sheetId),r.updateSheetProperties.properties);
@@ -88,3 +90,40 @@ test('failed migration keeps legacy cents and header without partial rewrites',a
 test('two new clients migrate once before overlapping card writes; no factor-100 or repeated rows',async()=>{const row=['明細','legacy-id','import','合成銀行','卡','2026-09','','','2026-09-01','2026-09-02','前月交易',10000,'消費','','','','','人工核對','2026-10-01T00:00:00Z','','2'],m=mock({barrier:true,tables:{'信用卡':[LEGACY_CARD_HEADERS,row]}}),p={bank:'合成銀行',transactions:[{date:'2026-10-01',postingDate:'2026-10-02',summary:'合成消費',amountCents:12345,kind:'消費',currency:'',foreignAmount:'',errors:[],line:2}]},a=await makeCardImport(p,{account:'卡',month:'2026-10',fileHash:'A'}),b=await makeCardImport(p,{account:'卡',month:'2026-10',fileHash:'B'});await Promise.all([m.store().saveCards(a),m.store().saveCards(b)]);assert.equal(m.tables['信用卡'].filter(r=>r[0]==='明細').length,2);assert.equal((await m.store().summary()).credits.totalCents,12345);assert.equal(m.tables['信用卡'][1][11],100);});
 
 test('unit migration installs a schema barrier that old clients cannot write past',async()=>{const m=mock({tables:{'信用卡':[LEGACY_CARD_HEADERS]}}),s=m.store();await s.cardCurrency();const guard=m.metadata.find(v=>v.metadataId===2000000000);assert.equal(guard.metadataValue,'cards-yuan-v1');assert.equal(guard.metadataKey,'fw2');assert.ok(!Number.isSafeInteger(Number(guard.metadataValue)));await s.writeRevision();assert.equal(s.cardUnitsGuard,true);});
+
+// v0.7.2: coordination metadata stays bounded.
+const meta=(metadataId,metadataKey,metadataValue)=>({metadataId,metadataKey,metadataValue,visibility:'DOCUMENT',location:{spreadsheet:true}});
+const used=m=>m.metadata.reduce((s,v)=>s+v.metadataKey.length+v.metadataValue.length,0);
+test('repeated imports keep a bounded revision window and add no per-import metadata',async()=>{
+ const m=mock(),s=m.store();
+ for(let i=0;i<60;i++)await s.save(await bankBatch('file-'+i,[t('交易'+i,10000-i)]));
+ const revisions=m.metadata.filter(v=>v.metadataKey==='fw2').map(v=>Number(v.metadataValue));
+ assert.equal(m.tables['銀行存款'].length,61);assert.equal(m.tables['匯入紀錄'].length,61);
+ assert.equal(Math.max(...revisions),60);assert.ok(revisions.length<=20);assert.ok(Math.min(...revisions)>40);
+ assert.equal(m.metadata.filter(v=>v.metadataKey!=='fw2').length,0);
+});
+test('a store already over the metadata budget recovers by pruning legacy import markers',async()=>{
+ const m=mock({tables:{'信用卡':[CARD_HEADERS]}});
+ for(let i=1;i<=330;i++){m.metadata.push(meta(1000000000+i,'fw2',String(i)));m.metadata.push(meta(5000+i,i%2?'financeImport':'financeStockImport','f'.repeat(64)));}
+ m.metadata.push(meta(9001,'financeStockSnapshot','s'.repeat(64)),meta(9002,'financeUnifiedLog','v1'),meta(2000000000,'fw2','cards-yuan-v1'));
+ assert.ok(used(m)>28000);
+ const r=await m.store().save(await bankBatch('file',[t('恢復',10000)]));assert.equal(r.added,1);
+ assert.ok(used(m)<1000);
+ assert.equal(m.metadata.filter(v=>['financeImport','financeStockImport','financeStockSnapshot'].includes(v.metadataKey)).length,0);
+ assert.ok(m.metadata.some(v=>v.metadataKey==='financeUnifiedLog'));assert.ok(m.metadata.some(v=>v.metadataId===2000000000));
+ const s=m.store();await s.writeRevision();assert.equal(s.cardUnitsGuard,true);
+});
+test('pruning does not weaken concurrent write serialization',async()=>{
+ const m=mock({barrier:true});for(let i=1;i<=40;i++)m.metadata.push(meta(1000000000+i,'fw2',String(i)));
+ const a=m.store(),b=m.store(),common=t('共同交易',10000),A=await bankBatch('file-A',[common,t('A',9900)]),B=await bankBatch('file-B',[common,t('B',9800)]);
+ const results=await Promise.all([a.save(A),b.save(B)]);
+ assert.deepEqual(results.map(r=>r.added).sort(),[1,2]);assert.equal(m.tables['銀行存款'].length,4);assert.ok(m.collisions>=1);
+ const revisions=m.metadata.filter(v=>v.metadataKey==='fw2').map(v=>Number(v.metadataValue));assert.equal(Math.max(...revisions),42);assert.ok(revisions.length<=20);
+});
+test('same stock snapshot from two devices is still stored once without snapshot markers',async()=>{
+ const m=mock({barrier:true});const payload={snapshot:{broker:'測試券商',asOf:'2026-10-21T10:12',errors:[],holdings:[{code:'1234',name:'虛構股票',quantity:20,currency:'TWD',close:7.5,priceDate:'2026-10-20',marketValueCents:15000}]},reconciliation:{pass:true},account:'證券'};
+ const A=await makeStockImport({...payload,fileHashes:{holdings:'A'}}),B=await makeStockImport({...payload,fileHashes:{holdings:'B'}});
+ await Promise.all([m.store().saveStocks(A),m.store().saveStocks(B)]);
+ assert.equal(stockSummary({'股票庫存':m.tables['股票庫存'].slice(1)}).totalCents,15000);
+ assert.equal(m.metadata.filter(v=>v.metadataKey.startsWith('financeStock')&&v.metadataKey!=='financeStockMerge').length,0);
+});
