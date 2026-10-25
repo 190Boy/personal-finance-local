@@ -1,1 +1,40 @@
-const fs=require('node:fs'),path=require('node:path'),XLSX=require('../web/vendor/sheetjs/xlsx.full.min.js');const dir=path.resolve(process.argv[2]||path.join(__dirname,'../test-results/fixtures-excel'));fs.mkdirSync(dir,{recursive:true});const header=['交易日期','交易時間','摘要','提','手續費','存','帳戶餘額','存摺備註','銀行代號/帳號','轉帳留言','財金序號'];const rows=[header,['2026/09/02','12:30:01','PRIVATE_EXCEL_7931','',0,100,1100,'測試','','',''],['2026/09/01','08:00:00','測試提款',50,'','',1000,'測試','','','']];for(const ext of ['xlsx','xls']){const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['說明：合成測試資料']]),'說明');XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet(rows),'測試交易');fs.writeFileSync(path.join(dir,'synthetic.'+ext),Buffer.from(XLSX.write(book,{type:'array',bookType:ext==='xls'?'biff8':'xlsx'})));}const b=XLSX.utils.book_new();rows[1][4]=15;XLSX.utils.book_append_sheet(b,XLSX.utils.aoa_to_sheet(rows),'測試交易');fs.writeFileSync(path.join(dir,'with-fee.xlsx'),Buffer.from(XLSX.write(b,{type:'array',bookType:'xlsx'})));console.log('Synthetic Excel fixtures ready');
+const fs = require('node:fs'),
+  path = require('node:path'),
+  XLSX = require('../web/vendor/sheetjs/xlsx.full.min.js');
+const dir = path.resolve(process.argv[2] || path.join(__dirname, '../test-results/fixtures-excel'));
+fs.mkdirSync(dir, { recursive: true });
+const header = [
+  '交易日期',
+  '交易時間',
+  '摘要',
+  '提',
+  '手續費',
+  '存',
+  '帳戶餘額',
+  '存摺備註',
+  '銀行代號/帳號',
+  '轉帳留言',
+  '財金序號'
+];
+const rows = [
+  header,
+  ['2026/09/02', '12:30:01', 'PRIVATE_EXCEL_7931', '', 0, 100, 1100, '測試', '', '', ''],
+  ['2026/09/01', '08:00:00', '測試提款', 50, '', '', 1000, '測試', '', '', '']
+];
+for (const ext of ['xlsx', 'xls']) {
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['說明：合成測試資料']]), '說明');
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), '測試交易');
+  fs.writeFileSync(
+    path.join(dir, 'synthetic.' + ext),
+    Buffer.from(XLSX.write(book, { type: 'array', bookType: ext === 'xls' ? 'biff8' : 'xlsx' }))
+  );
+}
+const b = XLSX.utils.book_new();
+rows[1][4] = 15;
+XLSX.utils.book_append_sheet(b, XLSX.utils.aoa_to_sheet(rows), '測試交易');
+fs.writeFileSync(
+  path.join(dir, 'with-fee.xlsx'),
+  Buffer.from(XLSX.write(b, { type: 'array', bookType: 'xlsx' }))
+);
+console.log('Synthetic Excel fixtures ready');

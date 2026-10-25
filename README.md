@@ -1,3 +1,7 @@
+# v0.7.3：程式碼統一格式（Prettier）
+
+只調整程式碼排版，功能完全不變。cloud／pdf-parser／web 的 JS 與 CSS、測試及工具腳本，改由 Prettier 3.9.10 統一格式（設定見 .prettierrc.json）；第三方套件、自動產生的 sw.js、HTML 與文件不納入。改程式後執行 npm run format 即可統一排版，npm run format:check 可檢查。驗證：53 個檔案格式化前後經 esbuild 壓縮輸出逐位元組相同，109 項單元測試通過。
+
 # v0.7.2：同步標記自動清理
 
 每次同步寫入都會在試算表留下協調用的 Developer Metadata，舊版只增不減，約三百多次匯入後會因容量上限（SYNC_METADATA_LIMIT）停止所有同步。本版改為只保留最新 20 筆版本標記，並停止新增每次匯入專屬的標記（financeImport／financeStockImport／financeStockSnapshot），既有的這類舊標記會在下一次寫入時一併刪除；已接近或超過上限的試算表也能在下一次寫入時自動恢復。

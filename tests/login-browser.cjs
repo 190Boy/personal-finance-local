@@ -1,30 +1,210 @@
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path');
-const BASE=process.env.FINANCE_TEST_URL||'http://127.0.0.1:4178';let browser;const results=[];
-(async()=>{
- browser=await chromium.launch({channel:'chrome',headless:true});
- const context=await browser.newContext({serviceWorkers:'block',viewport:{width:390,height:844}});
- const {IMPORT_HEADERS}=await import('../cloud/records.mjs');
- let email='first@example.com';const page=await context.newPage(),errors=[],apiRequests=[];
- page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/pdf-parser/extract.mjs',r=>r.fulfill({contentType:'text/javascript',body:'export const PDFJS_VERSION="test";'}));
- await page.route('https://accounts.google.com/gsi/client',r=>r.fulfill({contentType:'text/javascript',body:'window.testRequests=[];window.google={accounts:{oauth2:{hasGrantedAllScopes:()=>true,initTokenClient:o=>({requestAccessToken:c=>{window.testRequests.push({prompt:c.prompt,hint:o.login_hint||""});if(window.cancelNext){window.cancelNext=false;o.error_callback({type:"popup_closed"});return;}o.callback({access_token:"synthetic-token",expires_in:3600,scope:"https://www.googleapis.com/auth/drive.file"});}})}}};'}));
- await page.route('https://www.googleapis.com/**',r=>{apiRequests.push(r.request().url());const body=r.request().url().includes('/about?')?{user:{displayName:'合成測試使用者',emailAddress:email}}:{files:[{id:'synthetic-sheet',webViewLink:'https://docs.google.com/spreadsheets/d/synthetic-sheet'}]};return r.fulfill({contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-allow-headers':'authorization,content-type'},body:JSON.stringify(body)});});
- await page.route('https://sheets.googleapis.com/**',r=>{apiRequests.push(r.request().url());return r.fulfill({contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-allow-headers':'authorization,content-type'},body:JSON.stringify(r.request().url().includes('/values/')?{values:[IMPORT_HEADERS]}:{sheets:[{properties:{sheetId:1,title:'匯入紀錄'}}]})});});
- async function check(name,fn){try{await fn();results.push({name,status:'pass'});}catch(e){results.push({name,status:'fail',error:e.message});}}
- async function open(){await page.goto(BASE+'/web/');await page.waitForFunction(()=>!!window.google?.accounts&&!document.querySelector('#loginGoogle').disabled);}
- async function connected(){await page.waitForFunction(()=>location.hash==='#home'&&document.querySelector('#cloudStatus').textContent.startsWith('Google 已連接'));}
- await open();
- await check('entry does not initiate OAuth or read financial data',async()=>{assert.equal(await page.locator('#view-login').isVisible(),true);assert.equal(await page.locator('.bottomnav').isVisible(),false);assert.equal(await page.locator('#rememberAccount').isChecked(),false);assert.equal(await page.evaluate(()=>window.testRequests.length),0);assert.equal(apiRequests.length,0);assert.equal(await page.evaluate(()=>localStorage.length),0);});
- await check('local mode works without Google',async()=>{await page.getByRole('link',{name:'先使用本機匯入'}).click();await page.locator('#view-home').waitFor({state:'visible'});assert.equal(await page.locator('#view-home').isVisible(),true);await page.locator('[data-nav=import]').click();await page.locator('#view-import-hub').waitFor({state:'visible'});assert.equal(await page.locator('#view-import-hub').isVisible(),true);await page.locator('#view-import-hub a[href="#bank-import"]').click();await page.locator('#pdfFile').waitFor({state:'visible'});assert.equal(await page.locator('#pdfFile').isVisible(),true);assert.equal(apiRequests.length,0);});
- await check('opt-in persists only email and loads home',async()=>{await page.goto(BASE+'/web/#login');await page.waitForFunction(()=>!!window.google?.accounts&&!document.querySelector('#loginGoogle').disabled);await page.locator('#rememberAccount').check();await page.locator('#loginGoogle').click();await connected();const items=await page.evaluate(()=>Object.fromEntries(Object.keys(localStorage).map(k=>[k,localStorage.getItem(k)])));assert.deepEqual(items,{'finance-remembered-account-v1':'{"email":"first@example.com"}'});assert.equal(await page.textContent('#googleAccountEmail'),'first@example.com');});
- await check('new visit retains hint but no Google session',async()=>{apiRequests.length=0;await open();assert.equal(await page.textContent('#lastAccountHint'),'上次使用：first@example.com');assert.equal(await page.evaluate(()=>window.testRequests.length),0);assert.equal(apiRequests.length,0);assert.equal(await page.textContent('#connectGoogle'),'連接 Google');});
- await check('one click supplies hint without forced chooser',async()=>{await page.locator('#loginGoogle').click();await connected();assert.deepEqual(await page.evaluate(()=>window.testRequests.at(-1)),{prompt:'',hint:'first@example.com'});});
- await check('switch account uses chooser and clears old preview',async()=>{email='second@example.com';await page.evaluate(()=>{location.hash='login';document.querySelector('#rows').innerHTML='<tr><td>PRIVATE_PREVIEW</td></tr>';});await page.locator('#switchLoginAccount').click();await connected();assert.deepEqual(await page.evaluate(()=>window.testRequests.at(-1)),{prompt:'select_account',hint:''});assert.equal(await page.locator('#rows tr').count(),0);assert.ok((await page.evaluate(()=>localStorage.getItem('finance-remembered-account-v1'))).includes('second@example.com'));});
- await check('popup cancellation permits retry',async()=>{await open();await page.evaluate(()=>window.cancelNext=true);await page.locator('#loginGoogle').click();assert.equal(await page.locator('#loginGoogle').isEnabled(),true);assert.equal(await page.locator('#view-login').isVisible(),true);await page.locator('#loginGoogle').click();await connected();});
- await check('forget and explicit logout remove identity and preview',async()=>{await page.evaluate(()=>location.hash='settings');await page.locator('#forgetAccount').click();assert.equal(await page.evaluate(()=>localStorage.length),0);await page.evaluate(()=>{document.querySelector('#rows').innerHTML='<tr><td>PRIVATE_PREVIEW</td></tr>';});await page.locator('#connectGoogle').click();assert.equal(await page.locator('#rows tr').count(),0);assert.equal(await page.textContent('#googleAccountEmail'),'');await open();assert.equal(await page.locator('#rememberAccount').isChecked(),false);});
- await check('without opt-in no credential or identity is stored',async()=>{await page.locator('#loginGoogle').click();await connected();assert.equal(await page.evaluate(()=>localStorage.length),0);assert.equal(await page.evaluate(()=>sessionStorage.length),0);assert.equal(await page.evaluate(()=>document.cookie),'');});
- await check('mobile layout and runtime checks',async()=>{await open();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await fs.mkdir(path.join(__dirname,'../docs/login-test'),{recursive:true});await page.screenshot({path:path.join(__dirname,'../docs/login-test/mobile-login.png'),fullPage:true});assert.deepEqual(errors,[]);});
- const report={version:'0.6.2',browser:'Windows Chrome '+browser.version(),google:'mock only; no live account',iphoneSafari:'not tested',results};
- await fs.writeFile(path.join(__dirname,'../docs/login-test/results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));await browser.close();process.exit(results.some(r=>r.status==='fail')?1:0);
-})().catch(async e=>{console.error(e);await browser?.close();process.exit(1)});
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict'),
+  fs = require('node:fs/promises'),
+  path = require('node:path');
+const BASE = process.env.FINANCE_TEST_URL || 'http://127.0.0.1:4178';
+let browser;
+const results = [];
+(async () => {
+  browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const context = await browser.newContext({
+    serviceWorkers: 'block',
+    viewport: { width: 390, height: 844 }
+  });
+  const { IMPORT_HEADERS } = await import('../cloud/records.mjs');
+  let email = 'first@example.com';
+  const page = await context.newPage(),
+    errors = [],
+    apiRequests = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.route('**/pdf-parser/extract.mjs', r =>
+    r.fulfill({ contentType: 'text/javascript', body: 'export const PDFJS_VERSION="test";' })
+  );
+  await page.route('https://accounts.google.com/gsi/client', r =>
+    r.fulfill({
+      contentType: 'text/javascript',
+      body: 'window.testRequests=[];window.google={accounts:{oauth2:{hasGrantedAllScopes:()=>true,initTokenClient:o=>({requestAccessToken:c=>{window.testRequests.push({prompt:c.prompt,hint:o.login_hint||""});if(window.cancelNext){window.cancelNext=false;o.error_callback({type:"popup_closed"});return;}o.callback({access_token:"synthetic-token",expires_in:3600,scope:"https://www.googleapis.com/auth/drive.file"});}})}}};'
+    })
+  );
+  await page.route('https://www.googleapis.com/**', r => {
+    apiRequests.push(r.request().url());
+    const body = r.request().url().includes('/about?')
+      ? { user: { displayName: '合成測試使用者', emailAddress: email } }
+      : {
+          files: [
+            { id: 'synthetic-sheet', webViewLink: 'https://docs.google.com/spreadsheets/d/synthetic-sheet' }
+          ]
+        };
+    return r.fulfill({
+      contentType: 'application/json',
+      headers: {
+        'access-control-allow-origin': '*',
+        'access-control-allow-headers': 'authorization,content-type'
+      },
+      body: JSON.stringify(body)
+    });
+  });
+  await page.route('https://sheets.googleapis.com/**', r => {
+    apiRequests.push(r.request().url());
+    return r.fulfill({
+      contentType: 'application/json',
+      headers: {
+        'access-control-allow-origin': '*',
+        'access-control-allow-headers': 'authorization,content-type'
+      },
+      body: JSON.stringify(
+        r.request().url().includes('/values/')
+          ? { values: [IMPORT_HEADERS] }
+          : { sheets: [{ properties: { sheetId: 1, title: '匯入紀錄' } }] }
+      )
+    });
+  });
+  async function check(name, fn) {
+    try {
+      await fn();
+      results.push({ name, status: 'pass' });
+    } catch (e) {
+      results.push({ name, status: 'fail', error: e.message });
+    }
+  }
+  async function open() {
+    await page.goto(BASE + '/web/');
+    await page.waitForFunction(
+      () => !!window.google?.accounts && !document.querySelector('#loginGoogle').disabled
+    );
+  }
+  async function connected() {
+    await page.waitForFunction(
+      () =>
+        location.hash === '#home' &&
+        document.querySelector('#cloudStatus').textContent.startsWith('Google 已連接')
+    );
+  }
+  await open();
+  await check('entry does not initiate OAuth or read financial data', async () => {
+    assert.equal(await page.locator('#view-login').isVisible(), true);
+    assert.equal(await page.locator('.bottomnav').isVisible(), false);
+    assert.equal(await page.locator('#rememberAccount').isChecked(), false);
+    assert.equal(await page.evaluate(() => window.testRequests.length), 0);
+    assert.equal(apiRequests.length, 0);
+    assert.equal(await page.evaluate(() => localStorage.length), 0);
+  });
+  await check('local mode works without Google', async () => {
+    await page.getByRole('link', { name: '先使用本機匯入' }).click();
+    await page.locator('#view-home').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#view-home').isVisible(), true);
+    await page.locator('[data-nav=import]').click();
+    await page.locator('#view-import-hub').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#view-import-hub').isVisible(), true);
+    await page.locator('#view-import-hub a[href="#bank-import"]').click();
+    await page.locator('#pdfFile').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#pdfFile').isVisible(), true);
+    assert.equal(apiRequests.length, 0);
+  });
+  await check('opt-in persists only email and loads home', async () => {
+    await page.goto(BASE + '/web/#login');
+    await page.waitForFunction(
+      () => !!window.google?.accounts && !document.querySelector('#loginGoogle').disabled
+    );
+    await page.locator('#rememberAccount').check();
+    await page.locator('#loginGoogle').click();
+    await connected();
+    const items = await page.evaluate(() =>
+      Object.fromEntries(Object.keys(localStorage).map(k => [k, localStorage.getItem(k)]))
+    );
+    assert.deepEqual(items, { 'finance-remembered-account-v1': '{"email":"first@example.com"}' });
+    assert.equal(await page.textContent('#googleAccountEmail'), 'first@example.com');
+  });
+  await check('new visit retains hint but no Google session', async () => {
+    apiRequests.length = 0;
+    await open();
+    assert.equal(await page.textContent('#lastAccountHint'), '上次使用：first@example.com');
+    assert.equal(await page.evaluate(() => window.testRequests.length), 0);
+    assert.equal(apiRequests.length, 0);
+    assert.equal(await page.textContent('#connectGoogle'), '連接 Google');
+  });
+  await check('one click supplies hint without forced chooser', async () => {
+    await page.locator('#loginGoogle').click();
+    await connected();
+    assert.deepEqual(await page.evaluate(() => window.testRequests.at(-1)), {
+      prompt: '',
+      hint: 'first@example.com'
+    });
+  });
+  await check('switch account uses chooser and clears old preview', async () => {
+    email = 'second@example.com';
+    await page.evaluate(() => {
+      location.hash = 'login';
+      document.querySelector('#rows').innerHTML = '<tr><td>PRIVATE_PREVIEW</td></tr>';
+    });
+    await page.locator('#switchLoginAccount').click();
+    await connected();
+    assert.deepEqual(await page.evaluate(() => window.testRequests.at(-1)), {
+      prompt: 'select_account',
+      hint: ''
+    });
+    assert.equal(await page.locator('#rows tr').count(), 0);
+    assert.ok(
+      (await page.evaluate(() => localStorage.getItem('finance-remembered-account-v1'))).includes(
+        'second@example.com'
+      )
+    );
+  });
+  await check('popup cancellation permits retry', async () => {
+    await open();
+    await page.evaluate(() => (window.cancelNext = true));
+    await page.locator('#loginGoogle').click();
+    assert.equal(await page.locator('#loginGoogle').isEnabled(), true);
+    assert.equal(await page.locator('#view-login').isVisible(), true);
+    await page.locator('#loginGoogle').click();
+    await connected();
+  });
+  await check('forget and explicit logout remove identity and preview', async () => {
+    await page.evaluate(() => (location.hash = 'settings'));
+    await page.locator('#forgetAccount').click();
+    assert.equal(await page.evaluate(() => localStorage.length), 0);
+    await page.evaluate(() => {
+      document.querySelector('#rows').innerHTML = '<tr><td>PRIVATE_PREVIEW</td></tr>';
+    });
+    await page.locator('#connectGoogle').click();
+    assert.equal(await page.locator('#rows tr').count(), 0);
+    assert.equal(await page.textContent('#googleAccountEmail'), '');
+    await open();
+    assert.equal(await page.locator('#rememberAccount').isChecked(), false);
+  });
+  await check('without opt-in no credential or identity is stored', async () => {
+    await page.locator('#loginGoogle').click();
+    await connected();
+    assert.equal(await page.evaluate(() => localStorage.length), 0);
+    assert.equal(await page.evaluate(() => sessionStorage.length), 0);
+    assert.equal(await page.evaluate(() => document.cookie), '');
+  });
+  await check('mobile layout and runtime checks', async () => {
+    await open();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await fs.mkdir(path.join(__dirname, '../docs/login-test'), { recursive: true });
+    await page.screenshot({
+      path: path.join(__dirname, '../docs/login-test/mobile-login.png'),
+      fullPage: true
+    });
+    assert.deepEqual(errors, []);
+  });
+  const report = {
+    version: '0.6.2',
+    browser: 'Windows Chrome ' + browser.version(),
+    google: 'mock only; no live account',
+    iphoneSafari: 'not tested',
+    results
+  };
+  await fs.writeFile(
+    path.join(__dirname, '../docs/login-test/results.json'),
+    JSON.stringify(report, null, 2)
+  );
+  console.log(JSON.stringify(report, null, 2));
+  await browser.close();
+  process.exit(results.some(r => r.status === 'fail') ? 1 : 0);
+})().catch(async e => {
+  console.error(e);
+  await browser?.close();
+  process.exit(1);
+});
