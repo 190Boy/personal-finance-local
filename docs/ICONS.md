@@ -1,5 +1,11 @@
-# 目前圖示更新方式
+# 圖示更新方式
 
-Apple Touch Icon 的唯一來源為 web/icons/apple-touch-icon.png（180×180 PNG）。同名替換後，必須將該檔案轉成 Base64，同步替換 index.html、web/index.html 的 apple-touch-icon data URL，並更新 sw.js 的 VERSION。web/icon-test-inline.html 的宣告與預覽圖片也同步更新；web/icon-test-url.html 使用相同來源檔案。舊的 apple-touch-icon-v2.png 保留相容舊頁面，已非目前來源。
+Apple Touch Icon 的唯一來源是 `web/icons/apple-touch-icon.png`（180×180 PNG）。替換這個檔案後：
 
-正式頁面保留內嵌方式：使用者的 iPhone 測試中，外部圖片網址未顯示主畫面圖示，內嵌同圖則成功。web/index.html 的 CSP img-src 允許 self 與 data:。部署後關閉所有本站頁面／PWA 視窗再重開；舊主畫面捷徑必要時刪除再加入。新圖片仍須實機確認。
+1. 把檔案轉成 Base64，同步替換 `index.html` 與 `web/index.html` 裡 `apple-touch-icon` 的 data URL。
+2. 執行 `npm run build:pwa` 重新產生 `sw.js`。
+3. 部署後關閉所有本站頁面與主畫面 PWA 視窗再重開；舊的主畫面捷徑必要時刪除後重新加入。
+
+正式頁面使用內嵌圖片，是因為 iPhone 實測時外部圖片網址不會顯示成主畫面圖示，內嵌同一張圖才成功。`web/index.html` 的 CSP `img-src` 因此允許 `data:`。新圖片仍需在 iPhone 實機確認。
+
+一般圖示 `icon-32／180／192／512` 保留透明邊角；Apple 與 maskable 圖示用藍色實底，避免系統合成透明區時出現白邊。

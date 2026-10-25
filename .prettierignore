@@ -11,4 +11,3 @@ sw.js
 # Docs, test records and manifests are not code.
 *.md
 docs/
-FILES.sha256
