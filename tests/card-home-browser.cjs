@@ -1,29 +1,210 @@
-const {chromium}=require('playwright'),assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs'),path=require('node:path');
-const root=path.resolve(__dirname,'..'),base='http://127.0.0.1:4191';
-const server=http.createServer((req,res)=>{const p=path.resolve(root,'.'+new URL(req.url,base).pathname.replace(/\/$/,'/index.html'));if(!p.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}fs.readFile(p,(e,b)=>{res.writeHead(e?404:200,{'Content-Type':/\.(mjs|js)$/.test(p)?'text/javascript':/html$/.test(p)?'text/html':/css$/.test(p)?'text/css':'application/octet-stream'});res.end(e?'':b);});});
-(async()=>{
- await new Promise(r=>server.listen(4191,'127.0.0.1',r));
- const browser=await chromium.launch({...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{channel:'chrome'}),headless:true});
- try{
- const page=await browser.newPage({serviceWorkers:'block'}),sheets=[],rows={},errors=[],writes=[],metadata=[],formats=[];page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
- await page.route('https://accounts.google.com/gsi/client',r=>r.fulfill({contentType:'text/javascript',body:"window.google={accounts:{oauth2:{hasGrantedAllScopes:()=>true,initTokenClient:o=>({requestAccessToken:()=>o.callback({access_token:'synthetic-token',expires_in:3600})})}}};"}));
- await page.route('https://www.googleapis.com/**',r=>r.fulfill({contentType:'application/json',body:JSON.stringify(r.request().url().includes('/about?')?{user:{displayName:'合成測試',emailAddress:'synthetic@example.com'}}:r.request().method()==='POST'?{id:'synthetic-sheet'}:{files:[]})}));
- await page.route('https://sheets.googleapis.com/**',async route=>{
-  const req=route.request(),url=req.url();let out={};const body=req.postData()?JSON.parse(req.postData()):null;
-  if(body){writes.push(JSON.stringify(body));assert.ok(!JSON.stringify(body).includes('synthetic-password'));}
-  if(url.includes('/values/')){const tab=decodeURIComponent(url.split('/values/')[1].split('?')[0]).split("'")[1];if(req.method()==='PUT')rows[tab]=body.values;else out={values:rows[tab]||[]};}
-  else if(req.method()==='GET')out=url.includes('?fields=developerMetadata')?{developerMetadata:metadata}:{sheets:sheets.map(properties=>({properties}))};
-  else for(const r of body.requests){if(r.createDeveloperMetadata)metadata.push(r.createDeveloperMetadata.developerMetadata);if(r.repeatCell)formats.push(r.repeatCell);if(r.updateCells){const tab=sheets.find(s=>s.sheetId===r.updateCells.range.sheetId).title;rows[tab]=r.updateCells.rows.map(r=>r.values.map(v=>v.userEnteredValue.stringValue??v.userEnteredValue.numberValue));}if(r.addSheet)sheets.push({...r.addSheet.properties,sheetId:sheets.length+1});if(r.appendCells){const tab=sheets.find(s=>s.sheetId===r.appendCells.sheetId).title;rows[tab].push(...r.appendCells.rows.map(r=>r.values.map(v=>v.userEnteredValue.stringValue??v.userEnteredValue.numberValue)));}}
-  await route.fulfill({contentType:'application/json',body:JSON.stringify(out)});
- });
- const {LEGACY_CARD_HEADERS,CARD_HEADERS}=await import('../cloud/credit-cards.mjs');const {HEADERS,makeImport}=await import('../cloud/records.mjs');
- const detail=(id,month,amount,kind='消費')=>['明細',id,'old-import','合成中信','測試卡',month,'','','2026-10-01','2026-10-02','合成交易',amount,kind,'','','','','人工核對','2026-10-21T00:00:00Z','','2'];
- sheets.push({title:'信用卡',sheetId:1},{title:'銀行存款',sheetId:2});rows['信用卡']=[LEGACY_CARD_HEADERS,detail('old','2026-09',999900),detail('a','2026-10',12345),detail('b','2026-10',5050),detail('p','2026-10',-10000,'繳款'),detail('r','2026-10',-1000,'退款')];
- const bank=await makeImport({bank:'測試銀行',sourceType:'excel',transactions:[{date:'2026-10-20',time:'10:00:00',summary:'合成入帳',expenseCents:0,incomeCents:100000,feeCents:0,balanceCents:100000,balanceCheck:{status:'pass'},errors:[]}]},{account:'合成存款',fileHash:'bank',order:'ascending'});rows['銀行存款']=[HEADERS,...bank.rows];
- await page.goto(base+'/web/#login');await page.waitForFunction(()=>!!window.google?.accounts&&!document.querySelector('#loginGoogle').disabled);await page.click('#loginGoogle');await page.waitForFunction(()=>location.hash==='#home');
- assert.ok((await page.textContent('#creditCardDebt')).includes('173.95'));assert.equal(await page.textContent('#creditCardMonth'),'2026-10');assert.ok((await page.textContent('#creditCardDetail')).includes('2 筆'));assert.ok((await page.textContent('#netAssets')).includes('826.05'));assert.deepEqual(rows['信用卡'][0],CARD_HEADERS);assert.equal(rows['信用卡'][2][11],123.45);assert.equal(rows['信用卡'][4][11],-100);assert.equal(rows['信用卡'][2][1],'a');assert.equal(rows['信用卡'].length,6);assert.ok(formats.length>=3);assert.equal(metadata.filter(m=>m.metadataId===2000000000).length,1);
- await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:require('node:path').join(root,'home-v071-synthetic-mobile.png'),fullPage:true});
- await page.evaluate(()=>location.hash='transactions');assert.ok((await page.textContent('#historyCards')).includes('123.45'));await page.evaluate(()=>location.hash='home');await page.reload();await page.evaluate(()=>location.hash='login');await page.waitForFunction(()=>!!window.google?.accounts&&!document.querySelector('#loginGoogle').disabled);await page.click('#loginGoogle');await page.waitForFunction(()=>location.hash==='#home');assert.ok((await page.textContent('#creditCardDebt')).includes('173.95'));assert.equal(rows['信用卡'][2][11],123.45);assert.equal(metadata.filter(m=>m.metadataId===2000000000).length,1);assert.equal(rows['信用卡'].length,6);
- await page.evaluate(()=>location.hash='settings');await page.click('#connectGoogle');assert.equal(await page.textContent('#netAssets'),'尚未同步');assert.equal(await page.textContent('#creditCardMonth'),'');assert.deepEqual(errors,[]);console.log('PASS: legacy credit rows automatically migrate cents to yuan once; latest-month consumption and bank-minus-consumption net estimate render correctly; history, mobile width, reload and logout verified with synthetic data.');
- }finally{await browser.close();server.closeAllConnections();server.close();}
-})().catch(e=>{console.error(e.stack);server.close();process.exitCode=1;});
+const { chromium } = require('playwright'),
+  assert = require('node:assert/strict'),
+  http = require('node:http'),
+  fs = require('node:fs'),
+  path = require('node:path');
+const root = path.resolve(__dirname, '..'),
+  base = 'http://127.0.0.1:4191';
+const server = http.createServer((req, res) => {
+  const p = path.resolve(root, '.' + new URL(req.url, base).pathname.replace(/\/$/, '/index.html'));
+  if (!p.startsWith(root + path.sep)) {
+    res.writeHead(403);
+    res.end();
+    return;
+  }
+  fs.readFile(p, (e, b) => {
+    res.writeHead(e ? 404 : 200, {
+      'Content-Type': /\.(mjs|js)$/.test(p)
+        ? 'text/javascript'
+        : /html$/.test(p)
+          ? 'text/html'
+          : /css$/.test(p)
+            ? 'text/css'
+            : 'application/octet-stream'
+    });
+    res.end(e ? '' : b);
+  });
+});
+(async () => {
+  await new Promise(r => server.listen(4191, '127.0.0.1', r));
+  const browser = await chromium.launch({
+    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
+    headless: true
+  });
+  try {
+    const page = await browser.newPage({ serviceWorkers: 'block' }),
+      sheets = [],
+      rows = {},
+      errors = [],
+      writes = [],
+      metadata = [],
+      formats = [];
+    page.setDefaultTimeout(12000);
+    page.on('pageerror', e => errors.push(e.message));
+    await page.route('https://accounts.google.com/gsi/client', r =>
+      r.fulfill({
+        contentType: 'text/javascript',
+        body: "window.google={accounts:{oauth2:{hasGrantedAllScopes:()=>true,initTokenClient:o=>({requestAccessToken:()=>o.callback({access_token:'synthetic-token',expires_in:3600})})}}};"
+      })
+    );
+    await page.route('https://www.googleapis.com/**', r =>
+      r.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(
+          r.request().url().includes('/about?')
+            ? { user: { displayName: '合成測試', emailAddress: 'synthetic@example.com' } }
+            : r.request().method() === 'POST'
+              ? { id: 'synthetic-sheet' }
+              : { files: [] }
+        )
+      })
+    );
+    await page.route('https://sheets.googleapis.com/**', async route => {
+      const req = route.request(),
+        url = req.url();
+      let out = {};
+      const body = req.postData() ? JSON.parse(req.postData()) : null;
+      if (body) {
+        writes.push(JSON.stringify(body));
+        assert.ok(!JSON.stringify(body).includes('synthetic-password'));
+      }
+      if (url.includes('/values/')) {
+        const tab = decodeURIComponent(url.split('/values/')[1].split('?')[0]).split("'")[1];
+        if (req.method() === 'PUT') rows[tab] = body.values;
+        else out = { values: rows[tab] || [] };
+      } else if (req.method() === 'GET')
+        out = url.includes('?fields=developerMetadata')
+          ? { developerMetadata: metadata }
+          : { sheets: sheets.map(properties => ({ properties })) };
+      else
+        for (const r of body.requests) {
+          if (r.createDeveloperMetadata) metadata.push(r.createDeveloperMetadata.developerMetadata);
+          if (r.repeatCell) formats.push(r.repeatCell);
+          if (r.updateCells) {
+            const tab = sheets.find(s => s.sheetId === r.updateCells.range.sheetId).title;
+            rows[tab] = r.updateCells.rows.map(r =>
+              r.values.map(v => v.userEnteredValue.stringValue ?? v.userEnteredValue.numberValue)
+            );
+          }
+          if (r.addSheet) sheets.push({ ...r.addSheet.properties, sheetId: sheets.length + 1 });
+          if (r.appendCells) {
+            const tab = sheets.find(s => s.sheetId === r.appendCells.sheetId).title;
+            rows[tab].push(
+              ...r.appendCells.rows.map(r =>
+                r.values.map(v => v.userEnteredValue.stringValue ?? v.userEnteredValue.numberValue)
+              )
+            );
+          }
+        }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(out) });
+    });
+    const { LEGACY_CARD_HEADERS, CARD_HEADERS } = await import('../cloud/credit-cards.mjs');
+    const { HEADERS, makeImport } = await import('../cloud/records.mjs');
+    const detail = (id, month, amount, kind = '消費') => [
+      '明細',
+      id,
+      'old-import',
+      '合成中信',
+      '測試卡',
+      month,
+      '',
+      '',
+      '2026-10-01',
+      '2026-10-02',
+      '合成交易',
+      amount,
+      kind,
+      '',
+      '',
+      '',
+      '',
+      '人工核對',
+      '2026-10-21T00:00:00Z',
+      '',
+      '2'
+    ];
+    sheets.push({ title: '信用卡', sheetId: 1 }, { title: '銀行存款', sheetId: 2 });
+    rows['信用卡'] = [
+      LEGACY_CARD_HEADERS,
+      detail('old', '2026-09', 999900),
+      detail('a', '2026-10', 12345),
+      detail('b', '2026-10', 5050),
+      detail('p', '2026-10', -10000, '繳款'),
+      detail('r', '2026-10', -1000, '退款')
+    ];
+    const bank = await makeImport(
+      {
+        bank: '測試銀行',
+        sourceType: 'excel',
+        transactions: [
+          {
+            date: '2026-10-20',
+            time: '10:00:00',
+            summary: '合成入帳',
+            expenseCents: 0,
+            incomeCents: 100000,
+            feeCents: 0,
+            balanceCents: 100000,
+            balanceCheck: { status: 'pass' },
+            errors: []
+          }
+        ]
+      },
+      { account: '合成存款', fileHash: 'bank', order: 'ascending' }
+    );
+    rows['銀行存款'] = [HEADERS, ...bank.rows];
+    await page.goto(base + '/web/#login');
+    await page.waitForFunction(
+      () => !!window.google?.accounts && !document.querySelector('#loginGoogle').disabled
+    );
+    await page.click('#loginGoogle');
+    await page.waitForFunction(() => location.hash === '#home');
+    assert.ok((await page.textContent('#creditCardDebt')).includes('173.95'));
+    assert.equal(await page.textContent('#creditCardMonth'), '2026-10');
+    assert.ok((await page.textContent('#creditCardDetail')).includes('2 筆'));
+    assert.ok((await page.textContent('#netAssets')).includes('826.05'));
+    assert.deepEqual(rows['信用卡'][0], CARD_HEADERS);
+    assert.equal(rows['信用卡'][2][11], 123.45);
+    assert.equal(rows['信用卡'][4][11], -100);
+    assert.equal(rows['信用卡'][2][1], 'a');
+    assert.equal(rows['信用卡'].length, 6);
+    assert.ok(formats.length >= 3);
+    assert.equal(metadata.filter(m => m.metadataId === 2000000000).length, 1);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({
+      path: require('node:path').join(root, 'home-v071-synthetic-mobile.png'),
+      fullPage: true
+    });
+    await page.evaluate(() => (location.hash = 'transactions'));
+    assert.ok((await page.textContent('#historyCards')).includes('123.45'));
+    await page.evaluate(() => (location.hash = 'home'));
+    await page.reload();
+    await page.evaluate(() => (location.hash = 'login'));
+    await page.waitForFunction(
+      () => !!window.google?.accounts && !document.querySelector('#loginGoogle').disabled
+    );
+    await page.click('#loginGoogle');
+    await page.waitForFunction(() => location.hash === '#home');
+    assert.ok((await page.textContent('#creditCardDebt')).includes('173.95'));
+    assert.equal(rows['信用卡'][2][11], 123.45);
+    assert.equal(metadata.filter(m => m.metadataId === 2000000000).length, 1);
+    assert.equal(rows['信用卡'].length, 6);
+    await page.evaluate(() => (location.hash = 'settings'));
+    await page.click('#connectGoogle');
+    assert.equal(await page.textContent('#netAssets'), '尚未同步');
+    assert.equal(await page.textContent('#creditCardMonth'), '');
+    assert.deepEqual(errors, []);
+    console.log(
+      'PASS: legacy credit rows automatically migrate cents to yuan once; latest-month consumption and bank-minus-consumption net estimate render correctly; history, mobile width, reload and logout verified with synthetic data.'
+    );
+  } finally {
+    await browser.close();
+    server.closeAllConnections();
+    server.close();
+  }
+})().catch(e => {
+  console.error(e.stack);
+  server.close();
+  process.exitCode = 1;
+});

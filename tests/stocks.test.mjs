@@ -1,21 +1,188 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseStockPdf,reconcileStocks} from '../pdf-parser/stocks.mjs';
-import {makeStockImport,stockSummary} from '../cloud/stocks.mjs';
-import {assetParts} from '../web/assets.mjs';
-const item=(str,x,y,w=12)=>({str,x:x*1000,y,w,h:10});
-const base=(title)=>[item(title,.4,20),item('檔案產製時間：115年10月21日 10:12',.05,40,200),item('證券商名稱：中國信託綜合證券',.4,40,200),item('帳號：1234567890',.05,60,90)];
-function snapshot(){return parseStockPdf([{number:1,width:1000,height:700,items:[...base('證券存摺庫存資料-普通餘額'),item('證券代號',.11,100),item('證券名稱',.2,100),item('收盤價日期',.76,100),item('市值',.86,100),
-item('1',.07,130),item('1234',.11,130),item('虛構測試股票',.16,130),item('20',.34,130),item('7.50',.7,130),item('115/10/20',.76,130,40),item('150',.86,130),item('合計',.7,149),item('150',.86,149)]}],{kind:'holdings'});}
-function history(){return parseStockPdf([{number:1,width:1000,height:700,items:[...base('證券存摺登摺資料'),item('交易日期',.06,100),item('證券代號',.14,100),item('摘要',.36,100),item('提出數額',.44,100),item('存入數額',.54,100),
-item('115 10 20',.06,130,40),item('1234',.15,130),item('虛構測試股票',.22,130),item('買進',.36,130),item('10',.55,130),item('20',.7,130),
-item('115 10 19',.06,155,40),item('1234',.15,155),item('虛構測試股票',.22,155),item('買進',.36,155),item('10',.55,155),item('10',.7,155)]}],{kind:'movements'});}
-test('coordinate parsing, footer excluded, ROC date and share reconciliation',()=>{const s=snapshot(),h=history(),r=reconcileStocks(s,h);assert.deepEqual(s.errors,[]);assert.deepEqual(h.errors,[]);assert.equal(s.holdings[0].marketValueCents,15000);assert.equal(h.movements.length,2);assert.equal(r.pass,true);assert.equal(r.comparisons,1);assert.equal(r.checks.length,1);});
-test('quantity mismatch and unknown memo block save',async()=>{const s=snapshot(),h=history();h.movements[0].balance=21;const r=reconcileStocks(s,h);assert.equal(r.pass,false);await assert.rejects(makeStockImport({snapshot:s,history:h,reconciliation:r,account:'虛構帳戶'}),/STOCK_INVALID/);});
-test('unknown rotated content blocks snapshot',()=>{const s=parseStockPdf([{number:1,width:1000,items:base('未知格式'),excludedItems:[{str:'未知金融資料'}]}],{kind:'holdings'});assert.ok(s.errors.length);});
-test('stock batches use quantity units and deterministic duplicate IDs',async()=>{const s=snapshot(),h=history(),r=reconcileStocks(s,h),p={snapshot:s,history:h,reconciliation:r,account:'虛構帳戶',fileHashes:{holdings:'synthetic',movements:'synthetic2'}};const a=await makeStockImport(p),b=await makeStockImport(p);assert.equal(a.id,b.id);assert.equal(a.tables['股票庫存'].find(r=>r[0]==='持股')[12],20);assert.equal(a.tables['股票異動'][0][8],10);assert.equal(Object.values(a.tables).flat(2).some(v=>String(v).includes('1234567890')),false);});
-test('latest complete snapshot replaces holdings; older data and repeats do not add assets',async()=>{const s=snapshot(),r=reconcileStocks(s,null),a=await makeStockImport({snapshot:s,reconciliation:r,account:'虛構帳戶',fileHashes:{}});const tables=a.tables;let v=stockSummary(tables);assert.equal(v.totalCents,15000);const newer=[...tables['股票庫存'][0]];newer[0]='空庫存';newer[1]='empty';newer[4]='2026-10-22T10:12';newer[6]=0;newer[7]=0;tables['股票庫存'].push(newer);v=stockSummary(tables);assert.equal(v.totalCents,0);assert.equal(v.accounts.length,1);});
-test('conflicting or incomplete snapshot is excluded',async()=>{const a=await makeStockImport({snapshot:snapshot(),reconciliation:reconcileStocks(snapshot(),null),account:'虛構帳戶',fileHashes:{}});a.tables['股票庫存']=a.tables['股票庫存'].filter(r=>r[0]!=='持股');assert.equal(stockSummary(a.tables).pending.length,1);assert.equal(stockSummary(a.tables).totalCents,0);});
-test('pie excludes zero/negative data',()=>{assert.deepEqual(assetParts(null),[]);assert.equal(assetParts({totalCents:-100,stocks:{totalCents:15000}}).length,1);});
+import { parseStockPdf, reconcileStocks } from '../pdf-parser/stocks.mjs';
+import { makeStockImport, stockSummary } from '../cloud/stocks.mjs';
+import { assetParts } from '../web/assets.mjs';
+const item = (str, x, y, w = 12) => ({ str, x: x * 1000, y, w, h: 10 });
+const base = title => [
+  item(title, 0.4, 20),
+  item('檔案產製時間：115年10月21日 10:12', 0.05, 40, 200),
+  item('證券商名稱：中國信託綜合證券', 0.4, 40, 200),
+  item('帳號：1234567890', 0.05, 60, 90)
+];
+function snapshot() {
+  return parseStockPdf(
+    [
+      {
+        number: 1,
+        width: 1000,
+        height: 700,
+        items: [
+          ...base('證券存摺庫存資料-普通餘額'),
+          item('證券代號', 0.11, 100),
+          item('證券名稱', 0.2, 100),
+          item('收盤價日期', 0.76, 100),
+          item('市值', 0.86, 100),
+          item('1', 0.07, 130),
+          item('1234', 0.11, 130),
+          item('虛構測試股票', 0.16, 130),
+          item('20', 0.34, 130),
+          item('7.50', 0.7, 130),
+          item('115/10/20', 0.76, 130, 40),
+          item('150', 0.86, 130),
+          item('合計', 0.7, 149),
+          item('150', 0.86, 149)
+        ]
+      }
+    ],
+    { kind: 'holdings' }
+  );
+}
+function history() {
+  return parseStockPdf(
+    [
+      {
+        number: 1,
+        width: 1000,
+        height: 700,
+        items: [
+          ...base('證券存摺登摺資料'),
+          item('交易日期', 0.06, 100),
+          item('證券代號', 0.14, 100),
+          item('摘要', 0.36, 100),
+          item('提出數額', 0.44, 100),
+          item('存入數額', 0.54, 100),
+          item('115 10 20', 0.06, 130, 40),
+          item('1234', 0.15, 130),
+          item('虛構測試股票', 0.22, 130),
+          item('買進', 0.36, 130),
+          item('10', 0.55, 130),
+          item('20', 0.7, 130),
+          item('115 10 19', 0.06, 155, 40),
+          item('1234', 0.15, 155),
+          item('虛構測試股票', 0.22, 155),
+          item('買進', 0.36, 155),
+          item('10', 0.55, 155),
+          item('10', 0.7, 155)
+        ]
+      }
+    ],
+    { kind: 'movements' }
+  );
+}
+test('coordinate parsing, footer excluded, ROC date and share reconciliation', () => {
+  const s = snapshot(),
+    h = history(),
+    r = reconcileStocks(s, h);
+  assert.deepEqual(s.errors, []);
+  assert.deepEqual(h.errors, []);
+  assert.equal(s.holdings[0].marketValueCents, 15000);
+  assert.equal(h.movements.length, 2);
+  assert.equal(r.pass, true);
+  assert.equal(r.comparisons, 1);
+  assert.equal(r.checks.length, 1);
+});
+test('quantity mismatch and unknown memo block save', async () => {
+  const s = snapshot(),
+    h = history();
+  h.movements[0].balance = 21;
+  const r = reconcileStocks(s, h);
+  assert.equal(r.pass, false);
+  await assert.rejects(
+    makeStockImport({ snapshot: s, history: h, reconciliation: r, account: '虛構帳戶' }),
+    /STOCK_INVALID/
+  );
+});
+test('unknown rotated content blocks snapshot', () => {
+  const s = parseStockPdf(
+    [{ number: 1, width: 1000, items: base('未知格式'), excludedItems: [{ str: '未知金融資料' }] }],
+    { kind: 'holdings' }
+  );
+  assert.ok(s.errors.length);
+});
+test('stock batches use quantity units and deterministic duplicate IDs', async () => {
+  const s = snapshot(),
+    h = history(),
+    r = reconcileStocks(s, h),
+    p = {
+      snapshot: s,
+      history: h,
+      reconciliation: r,
+      account: '虛構帳戶',
+      fileHashes: { holdings: 'synthetic', movements: 'synthetic2' }
+    };
+  const a = await makeStockImport(p),
+    b = await makeStockImport(p);
+  assert.equal(a.id, b.id);
+  assert.equal(a.tables['股票庫存'].find(r => r[0] === '持股')[12], 20);
+  assert.equal(a.tables['股票異動'][0][8], 10);
+  assert.equal(
+    Object.values(a.tables)
+      .flat(2)
+      .some(v => String(v).includes('1234567890')),
+    false
+  );
+});
+test('latest complete snapshot replaces holdings; older data and repeats do not add assets', async () => {
+  const s = snapshot(),
+    r = reconcileStocks(s, null),
+    a = await makeStockImport({ snapshot: s, reconciliation: r, account: '虛構帳戶', fileHashes: {} });
+  const tables = a.tables;
+  let v = stockSummary(tables);
+  assert.equal(v.totalCents, 15000);
+  const newer = [...tables['股票庫存'][0]];
+  newer[0] = '空庫存';
+  newer[1] = 'empty';
+  newer[4] = '2026-10-22T10:12';
+  newer[6] = 0;
+  newer[7] = 0;
+  tables['股票庫存'].push(newer);
+  v = stockSummary(tables);
+  assert.equal(v.totalCents, 0);
+  assert.equal(v.accounts.length, 1);
+});
+test('conflicting or incomplete snapshot is excluded', async () => {
+  const a = await makeStockImport({
+    snapshot: snapshot(),
+    reconciliation: reconcileStocks(snapshot(), null),
+    account: '虛構帳戶',
+    fileHashes: {}
+  });
+  a.tables['股票庫存'] = a.tables['股票庫存'].filter(r => r[0] !== '持股');
+  assert.equal(stockSummary(a.tables).pending.length, 1);
+  assert.equal(stockSummary(a.tables).totalCents, 0);
+});
+test('pie excludes zero/negative data', () => {
+  assert.deepEqual(assetParts(null), []);
+  assert.equal(assetParts({ totalCents: -100, stocks: { totalCents: 15000 } }).length, 1);
+});
 
-test('right-aligned single-digit withdrawal stays in the withdrawal column',()=>{const h=parseStockPdf([{number:1,width:1000,height:700,items:[...base('證券存摺登摺資料'),item('交易日期',.06,100),item('證券代號',.14,100),item('摘要',.36,100),item('提出數額',.44,100),item('存入數額',.54,100),item('115 10 20',.06,130,40),item('1234',.15,130),item('虛構股票',.22,130),item('賣出',.36,130),item('1',.523,130,7.127),item('0',.76,130)]}],{kind:'movements'});assert.deepEqual(h.errors,[]);assert.equal(h.movements[0].withdrawal,1);assert.equal(h.movements[0].deposit,0);});
+test('right-aligned single-digit withdrawal stays in the withdrawal column', () => {
+  const h = parseStockPdf(
+    [
+      {
+        number: 1,
+        width: 1000,
+        height: 700,
+        items: [
+          ...base('證券存摺登摺資料'),
+          item('交易日期', 0.06, 100),
+          item('證券代號', 0.14, 100),
+          item('摘要', 0.36, 100),
+          item('提出數額', 0.44, 100),
+          item('存入數額', 0.54, 100),
+          item('115 10 20', 0.06, 130, 40),
+          item('1234', 0.15, 130),
+          item('虛構股票', 0.22, 130),
+          item('賣出', 0.36, 130),
+          item('1', 0.523, 130, 7.127),
+          item('0', 0.76, 130)
+        ]
+      }
+    ],
+    { kind: 'movements' }
+  );
+  assert.deepEqual(h.errors, []);
+  assert.equal(h.movements[0].withdrawal, 1);
+  assert.equal(h.movements[0].deposit, 0);
+});

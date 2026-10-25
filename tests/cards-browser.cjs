@@ -1,36 +1,229 @@
-const {chromium}=require('playwright'),assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs'),path=require('node:path');
-const root=path.resolve(__dirname,'..'),base='http://127.0.0.1:4191';
-const server=http.createServer((req,res)=>{const p=path.resolve(root,'.'+new URL(req.url,base).pathname.replace(/\/$/,'/index.html'));if(!p.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}fs.readFile(p,(e,b)=>{res.writeHead(e?404:200,{'Content-Type':/\.(mjs|js)$/.test(p)?'text/javascript':/html$/.test(p)?'text/html':/css$/.test(p)?'text/css':'application/octet-stream'});res.end(e?'':b);});});
-(async()=>{
- await new Promise(r=>server.listen(4191,'127.0.0.1',r));
- const browser=await chromium.launch({...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{channel:'chrome'}),headless:true});
- try{
- const page=await browser.newPage({serviceWorkers:'block'}),sheets=[],rows={},errors=[],writes=[],metadata=[],formats=[];page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
- await page.route('https://accounts.google.com/gsi/client',r=>r.fulfill({contentType:'text/javascript',body:"window.google={accounts:{oauth2:{hasGrantedAllScopes:()=>true,initTokenClient:o=>({requestAccessToken:()=>o.callback({access_token:'synthetic-token',expires_in:3600})})}}};"}));
- await page.route('https://www.googleapis.com/**',r=>r.fulfill({contentType:'application/json',body:JSON.stringify(r.request().url().includes('/about?')?{user:{displayName:'合成測試',emailAddress:'synthetic@example.com'}}:r.request().method()==='POST'?{id:'synthetic-sheet'}:{files:[]})}));
- await page.route('https://sheets.googleapis.com/**',async route=>{
-  const req=route.request(),url=req.url();let out={};const body=req.postData()?JSON.parse(req.postData()):null;
-  if(body){writes.push(JSON.stringify(body));assert.ok(!JSON.stringify(body).includes('synthetic-password'));}
-  if(url.includes('/values/')){const tab=decodeURIComponent(url.split('/values/')[1].split('?')[0]).split("'")[1];if(req.method()==='PUT')rows[tab]=body.values;else out={values:rows[tab]||[]};}
-  else if(req.method()==='GET')out=url.includes('?fields=developerMetadata')?{developerMetadata:metadata}:{sheets:sheets.map(properties=>({properties}))};
-  else for(const r of body.requests){if(r.createDeveloperMetadata)metadata.push(r.createDeveloperMetadata.developerMetadata);if(r.repeatCell)formats.push(r.repeatCell);if(r.updateCells){const tab=sheets.find(s=>s.sheetId===r.updateCells.range.sheetId).title;rows[tab]=r.updateCells.rows.map(r=>r.values.map(v=>v.userEnteredValue.stringValue??v.userEnteredValue.numberValue));}if(r.addSheet)sheets.push({...r.addSheet.properties,sheetId:sheets.length+1});if(r.appendCells){const tab=sheets.find(s=>s.sheetId===r.appendCells.sheetId).title;rows[tab].push(...r.appendCells.rows.map(r=>r.values.map(v=>v.userEnteredValue.stringValue??v.userEnteredValue.numberValue)));}}
-  await route.fulfill({contentType:'application/json',body:JSON.stringify(out)});
- });
- const X=require('../web/vendor/sheetjs/xlsx.full.min.js');const wb=X.utils.book_new();X.utils.book_append_sheet(wb,X.utils.aoa_to_sheet([['9月份帳單'],['NTD 300'],['最低應繳金額','NTD 30'],['最近結帳日','2026/09/20'],['繳費截止日(遇假日順延)','2026/10/05'],['月份','特店名稱','消費日期','消費金額','卡號末四碼','消費地','入帳日期','消費幣別'],['9','合成商店','2026/09/02','NTD 300','9999','','2026/09/03','-']]),'Sheet1');
- const xlsx=X.write(wb,{bookType:'xlsx',type:'buffer'});
- const csv='帳單明細查詢\n資料時間：2026/10/21 00:00:00\n消費日,入帳起息日,摘要,幣別,消費地金額,外幣折算日,消費地,末四碼,新臺幣金額\n2026/09/02,2026/09/03,合成商店,,,,,9999,100\n2026/09/03,2026/09/04,自動扣繳,,,,,9999,-200\n2026/09/04,2026/09/05,退款,,,,,9999,-10\n';
- await page.goto(base+'/web/#login');await page.waitForFunction(()=>!!window.google?.accounts&&!document.querySelector('#loginGoogle').disabled);await page.click('#loginGoogle');await page.waitForFunction(()=>location.hash==='#home');
- await page.evaluate(()=>location.hash='cards');await page.setInputFiles('#cardFile',{name:'synthetic.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(xlsx)});await page.fill('#cardAccount','合成凱基');await page.click('#cardParse');await page.waitForFunction(()=>!document.querySelector('#cardParse').disabled);assert.ok((await page.textContent('#cardStatus')).includes('讀取完成'),await page.textContent('#cardStatus'));
- assert.equal(await page.inputValue('#cardMonth'),'2026-09');assert.equal(await page.inputValue('#cardPaid'),'');assert.equal(await page.locator('#cardDebtConfirmed').isChecked(),false);assert.equal(await page.locator('#cardPreview article').count(),1);assert.equal(rows['信用卡'],undefined);
- await page.click('#cardExtra summary');await page.selectOption('#cardBillKind','已出帳');await page.fill('#cardPaid','50');await page.fill('#cardPaidAsOf','2026-09-22');await page.check('#cardDebtConfirmed');await page.check('#cardConsent');await page.click('#cardSave');await page.waitForFunction(()=>!document.querySelector('#cardParse').disabled);assert.ok((await page.textContent('#cardStatus')).includes('已同步'),await page.textContent('#cardStatus'));
- assert.equal(rows['信用卡'].length,3);assert.equal(rows['信用卡'][1].length,21);assert.equal(rows['匯入紀錄'].at(-1)[3],'信用卡');assert.ok(!writes.join('').includes('9999'));
- await page.click('#cardSave');await page.waitForFunction(()=>document.querySelector('#cardStatus').textContent.includes('已記錄'));assert.equal(rows['信用卡'].length,3);
- await page.evaluate(()=>location.hash='home');assert.ok((await page.textContent('#creditCardDebt')).includes('300.00'));assert.equal(await page.locator('#assetPie svg').count(),0);assert.ok((await page.textContent('#netAssets')).includes('-300.00'));assert.equal(await page.textContent('#creditCardMonth'),'2026-09');
- await page.evaluate(()=>location.hash='cards');await page.selectOption('#cardBank','ctbc');await page.setInputFiles('#cardFile',{name:'synthetic.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});await page.fill('#cardAccount','合成中信');await page.click('#cardParse');await page.waitForFunction(()=>document.querySelector('#cardStatus').textContent.includes('讀取完成'));assert.equal(await page.inputValue('#cardMonth'),'');assert.equal(await page.inputValue('#cardTotal'),'');assert.equal(await page.locator('#cardPreview article').count(),3);await page.fill('#cardMonth','2026-09');await page.check('#cardConsent');await page.click('#cardSave');await page.waitForFunction(()=>document.querySelector('#cardStatus').textContent.includes('已同步'));assert.equal(rows['信用卡'].length,7);assert.equal(rows['信用卡'][2][11],300);assert.equal(rows['信用卡'][4][11],100);
- await page.evaluate(()=>location.hash='transactions');await page.click('#historyFilters summary');await page.selectOption('#historyKind','信用卡');assert.ok((await page.textContent('#historyCount')).includes('4 筆'));assert.ok((await page.textContent('#historyRows')).includes('繳款'));assert.ok((await page.textContent('#historyRows')).includes('-200'));assert.ok((await page.textContent('#historyRows')).includes('-10'));
- await page.setViewportSize({width:390,height:844});await page.evaluate(()=>location.hash='cards');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:require('node:path').join(root,'outputs-credit-mobile.png'),fullPage:true});
- await page.reload();await page.evaluate(()=>location.hash='login');await page.waitForFunction(()=>!!window.google?.accounts&&!document.querySelector('#loginGoogle').disabled);await page.click('#loginGoogle');await page.waitForFunction(()=>location.hash==='#home');assert.ok((await page.textContent('#creditCardDebt')).includes('400.00'));assert.ok((await page.textContent('#netAssets')).includes('-400.00'));assert.ok((await page.textContent('#creditCardDetail')).includes('合成中信'));
- await page.evaluate(()=>location.hash='settings');await page.click('#connectGoogle');assert.equal(await page.textContent('#creditCardDebt'),'尚未同步');assert.equal(await page.locator('#cardPreview article').count(),0);assert.equal(await page.inputValue('#cardPassword'),'');assert.deepEqual(errors,[]);
- console.log('PASS: local XLSX/CSV credit-card preview, explicit confirmation, one credit sheet/shared ledger, repeat dedup, payment/refund history, partial debt homepage, re-login, logout and 390px width.');
- }finally{await browser.close();server.closeAllConnections();server.close();}
-})().catch(e=>{console.error(e.stack);server.close();process.exitCode=1;});
+const { chromium } = require('playwright'),
+  assert = require('node:assert/strict'),
+  http = require('node:http'),
+  fs = require('node:fs'),
+  path = require('node:path');
+const root = path.resolve(__dirname, '..'),
+  base = 'http://127.0.0.1:4191';
+const server = http.createServer((req, res) => {
+  const p = path.resolve(root, '.' + new URL(req.url, base).pathname.replace(/\/$/, '/index.html'));
+  if (!p.startsWith(root + path.sep)) {
+    res.writeHead(403);
+    res.end();
+    return;
+  }
+  fs.readFile(p, (e, b) => {
+    res.writeHead(e ? 404 : 200, {
+      'Content-Type': /\.(mjs|js)$/.test(p)
+        ? 'text/javascript'
+        : /html$/.test(p)
+          ? 'text/html'
+          : /css$/.test(p)
+            ? 'text/css'
+            : 'application/octet-stream'
+    });
+    res.end(e ? '' : b);
+  });
+});
+(async () => {
+  await new Promise(r => server.listen(4191, '127.0.0.1', r));
+  const browser = await chromium.launch({
+    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
+    headless: true
+  });
+  try {
+    const page = await browser.newPage({ serviceWorkers: 'block' }),
+      sheets = [],
+      rows = {},
+      errors = [],
+      writes = [],
+      metadata = [],
+      formats = [];
+    page.setDefaultTimeout(12000);
+    page.on('pageerror', e => errors.push(e.message));
+    await page.route('https://accounts.google.com/gsi/client', r =>
+      r.fulfill({
+        contentType: 'text/javascript',
+        body: "window.google={accounts:{oauth2:{hasGrantedAllScopes:()=>true,initTokenClient:o=>({requestAccessToken:()=>o.callback({access_token:'synthetic-token',expires_in:3600})})}}};"
+      })
+    );
+    await page.route('https://www.googleapis.com/**', r =>
+      r.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(
+          r.request().url().includes('/about?')
+            ? { user: { displayName: '合成測試', emailAddress: 'synthetic@example.com' } }
+            : r.request().method() === 'POST'
+              ? { id: 'synthetic-sheet' }
+              : { files: [] }
+        )
+      })
+    );
+    await page.route('https://sheets.googleapis.com/**', async route => {
+      const req = route.request(),
+        url = req.url();
+      let out = {};
+      const body = req.postData() ? JSON.parse(req.postData()) : null;
+      if (body) {
+        writes.push(JSON.stringify(body));
+        assert.ok(!JSON.stringify(body).includes('synthetic-password'));
+      }
+      if (url.includes('/values/')) {
+        const tab = decodeURIComponent(url.split('/values/')[1].split('?')[0]).split("'")[1];
+        if (req.method() === 'PUT') rows[tab] = body.values;
+        else out = { values: rows[tab] || [] };
+      } else if (req.method() === 'GET')
+        out = url.includes('?fields=developerMetadata')
+          ? { developerMetadata: metadata }
+          : { sheets: sheets.map(properties => ({ properties })) };
+      else
+        for (const r of body.requests) {
+          if (r.createDeveloperMetadata) metadata.push(r.createDeveloperMetadata.developerMetadata);
+          if (r.repeatCell) formats.push(r.repeatCell);
+          if (r.updateCells) {
+            const tab = sheets.find(s => s.sheetId === r.updateCells.range.sheetId).title;
+            rows[tab] = r.updateCells.rows.map(r =>
+              r.values.map(v => v.userEnteredValue.stringValue ?? v.userEnteredValue.numberValue)
+            );
+          }
+          if (r.addSheet) sheets.push({ ...r.addSheet.properties, sheetId: sheets.length + 1 });
+          if (r.appendCells) {
+            const tab = sheets.find(s => s.sheetId === r.appendCells.sheetId).title;
+            rows[tab].push(
+              ...r.appendCells.rows.map(r =>
+                r.values.map(v => v.userEnteredValue.stringValue ?? v.userEnteredValue.numberValue)
+              )
+            );
+          }
+        }
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(out) });
+    });
+    const X = require('../web/vendor/sheetjs/xlsx.full.min.js');
+    const wb = X.utils.book_new();
+    X.utils.book_append_sheet(
+      wb,
+      X.utils.aoa_to_sheet([
+        ['9月份帳單'],
+        ['NTD 300'],
+        ['最低應繳金額', 'NTD 30'],
+        ['最近結帳日', '2026/09/20'],
+        ['繳費截止日(遇假日順延)', '2026/10/05'],
+        ['月份', '特店名稱', '消費日期', '消費金額', '卡號末四碼', '消費地', '入帳日期', '消費幣別'],
+        ['9', '合成商店', '2026/09/02', 'NTD 300', '9999', '', '2026/09/03', '-']
+      ]),
+      'Sheet1'
+    );
+    const xlsx = X.write(wb, { bookType: 'xlsx', type: 'buffer' });
+    const csv =
+      '帳單明細查詢\n資料時間：2026/10/21 00:00:00\n消費日,入帳起息日,摘要,幣別,消費地金額,外幣折算日,消費地,末四碼,新臺幣金額\n2026/09/02,2026/09/03,合成商店,,,,,9999,100\n2026/09/03,2026/09/04,自動扣繳,,,,,9999,-200\n2026/09/04,2026/09/05,退款,,,,,9999,-10\n';
+    await page.goto(base + '/web/#login');
+    await page.waitForFunction(
+      () => !!window.google?.accounts && !document.querySelector('#loginGoogle').disabled
+    );
+    await page.click('#loginGoogle');
+    await page.waitForFunction(() => location.hash === '#home');
+    await page.evaluate(() => (location.hash = 'cards'));
+    await page.setInputFiles('#cardFile', {
+      name: 'synthetic.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: Buffer.from(xlsx)
+    });
+    await page.fill('#cardAccount', '合成凱基');
+    await page.click('#cardParse');
+    await page.waitForFunction(() => !document.querySelector('#cardParse').disabled);
+    assert.ok(
+      (await page.textContent('#cardStatus')).includes('讀取完成'),
+      await page.textContent('#cardStatus')
+    );
+    assert.equal(await page.inputValue('#cardMonth'), '2026-09');
+    assert.equal(await page.inputValue('#cardPaid'), '');
+    assert.equal(await page.locator('#cardDebtConfirmed').isChecked(), false);
+    assert.equal(await page.locator('#cardPreview article').count(), 1);
+    assert.equal(rows['信用卡'], undefined);
+    await page.click('#cardExtra summary');
+    await page.selectOption('#cardBillKind', '已出帳');
+    await page.fill('#cardPaid', '50');
+    await page.fill('#cardPaidAsOf', '2026-09-22');
+    await page.check('#cardDebtConfirmed');
+    await page.check('#cardConsent');
+    await page.click('#cardSave');
+    await page.waitForFunction(() => !document.querySelector('#cardParse').disabled);
+    assert.ok(
+      (await page.textContent('#cardStatus')).includes('已同步'),
+      await page.textContent('#cardStatus')
+    );
+    assert.equal(rows['信用卡'].length, 3);
+    assert.equal(rows['信用卡'][1].length, 21);
+    assert.equal(rows['匯入紀錄'].at(-1)[3], '信用卡');
+    assert.ok(!writes.join('').includes('9999'));
+    await page.click('#cardSave');
+    await page.waitForFunction(() => document.querySelector('#cardStatus').textContent.includes('已記錄'));
+    assert.equal(rows['信用卡'].length, 3);
+    await page.evaluate(() => (location.hash = 'home'));
+    assert.ok((await page.textContent('#creditCardDebt')).includes('300.00'));
+    assert.equal(await page.locator('#assetPie svg').count(), 0);
+    assert.ok((await page.textContent('#netAssets')).includes('-300.00'));
+    assert.equal(await page.textContent('#creditCardMonth'), '2026-09');
+    await page.evaluate(() => (location.hash = 'cards'));
+    await page.selectOption('#cardBank', 'ctbc');
+    await page.setInputFiles('#cardFile', {
+      name: 'synthetic.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(csv)
+    });
+    await page.fill('#cardAccount', '合成中信');
+    await page.click('#cardParse');
+    await page.waitForFunction(() => document.querySelector('#cardStatus').textContent.includes('讀取完成'));
+    assert.equal(await page.inputValue('#cardMonth'), '');
+    assert.equal(await page.inputValue('#cardTotal'), '');
+    assert.equal(await page.locator('#cardPreview article').count(), 3);
+    await page.fill('#cardMonth', '2026-09');
+    await page.check('#cardConsent');
+    await page.click('#cardSave');
+    await page.waitForFunction(() => document.querySelector('#cardStatus').textContent.includes('已同步'));
+    assert.equal(rows['信用卡'].length, 7);
+    assert.equal(rows['信用卡'][2][11], 300);
+    assert.equal(rows['信用卡'][4][11], 100);
+    await page.evaluate(() => (location.hash = 'transactions'));
+    await page.click('#historyFilters summary');
+    await page.selectOption('#historyKind', '信用卡');
+    assert.ok((await page.textContent('#historyCount')).includes('4 筆'));
+    assert.ok((await page.textContent('#historyRows')).includes('繳款'));
+    assert.ok((await page.textContent('#historyRows')).includes('-200'));
+    assert.ok((await page.textContent('#historyRows')).includes('-10'));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => (location.hash = 'cards'));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({
+      path: require('node:path').join(root, 'outputs-credit-mobile.png'),
+      fullPage: true
+    });
+    await page.reload();
+    await page.evaluate(() => (location.hash = 'login'));
+    await page.waitForFunction(
+      () => !!window.google?.accounts && !document.querySelector('#loginGoogle').disabled
+    );
+    await page.click('#loginGoogle');
+    await page.waitForFunction(() => location.hash === '#home');
+    assert.ok((await page.textContent('#creditCardDebt')).includes('400.00'));
+    assert.ok((await page.textContent('#netAssets')).includes('-400.00'));
+    assert.ok((await page.textContent('#creditCardDetail')).includes('合成中信'));
+    await page.evaluate(() => (location.hash = 'settings'));
+    await page.click('#connectGoogle');
+    assert.equal(await page.textContent('#creditCardDebt'), '尚未同步');
+    assert.equal(await page.locator('#cardPreview article').count(), 0);
+    assert.equal(await page.inputValue('#cardPassword'), '');
+    assert.deepEqual(errors, []);
+    console.log(
+      'PASS: local XLSX/CSV credit-card preview, explicit confirmation, one credit sheet/shared ledger, repeat dedup, payment/refund history, partial debt homepage, re-login, logout and 390px width.'
+    );
+  } finally {
+    await browser.close();
+    server.closeAllConnections();
+    server.close();
+  }
+})().catch(e => {
+  console.error(e.stack);
+  server.close();
+  process.exitCode = 1;
+});
