@@ -7,6 +7,7 @@ import {
   cardSheetRows
 } from './credit-cards.mjs';
 import { rowsToAppend } from './dedup.mjs';
+import { INVOICE_HEADERS, invoiceTable, invoiceRowsToAppend, invoiceSheetRows } from './invoices.mjs';
 import { mergeStockTables } from './stock-layout.mjs';
 import { ledgerPlan, migrationId } from './ledger.mjs';
 import { cloudHistory } from './history.mjs';
@@ -632,6 +633,57 @@ export class GoogleStore {
           throw e;
         }
         return { repeated: false, added: log[6] };
+      });
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  async saveInvoices(batch) {
+    if (this.saving) throw Error('SYNC_BUSY');
+    this.saving = true;
+    try {
+      await this.unifiedLog();
+      return await this.coordinated(async revision => {
+        const sheet = await this.ensure('發票', INVOICE_HEADERS);
+        const epoch = this.epoch,
+          fileId = this.file?.id,
+          logs = (await this.read('匯入紀錄')).slice(1);
+        if (logs.some(r => r[0] === batch.id)) return { repeated: true, added: 0, skipped: 0, changed: 0 };
+        const plan = invoiceRowsToAppend(invoiceTable(await this.read('發票')), batch.rows),
+          log = [...batch.log];
+        log[6] = plan.added;
+        // Invoice rows and the import ledger succeed or fail together; the revision rejects stale writers.
+        const requests = [
+          ...this.revisionRequests(revision),
+          ...(plan.fresh.length
+            ? [
+                {
+                  appendCells: {
+                    sheetId: sheet.sheetId,
+                    rows: cells(invoiceSheetRows(plan.fresh)),
+                    fields: 'userEnteredValue'
+                  }
+                }
+              ]
+            : []),
+          {
+            appendCells: {
+              sheetId: this.sheets.find(s => s.title === '匯入紀錄').sheetId,
+              rows: cells([log]),
+              fields: 'userEnteredValue'
+            }
+          }
+        ];
+        if (epoch !== this.epoch || fileId !== this.file?.id) throw Error('GOOGLE_LOGIN_REQUIRED');
+        try {
+          await this.api(SHEETS + '/' + fileId + ':batchUpdate', { method: 'POST', body: { requests } });
+        } catch (e) {
+          if ((await this.read('匯入紀錄')).slice(1).some(r => r[0] === batch.id))
+            return { repeated: true, added: 0, skipped: 0, changed: 0 };
+          throw e;
+        }
+        return { repeated: false, added: plan.added, skipped: plan.skipped, changed: plan.changed };
       });
     } finally {
       this.saving = false;
