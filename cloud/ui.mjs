@@ -1,4 +1,5 @@
 import { makeCardImport } from './credit-cards.mjs';
+import { makeInvoiceImport } from './invoices.mjs';
 import { initHistory, renderHistory, clearHistory } from '../web/history.mjs';
 import { renderAssets } from '../web/assets.mjs';
 import { makeStockImport } from './stocks.mjs';
@@ -387,6 +388,19 @@ export function initCloud({ getPayload }) {
         const saved = await store.saveCards(batch);
         await summary();
         return saved;
+      } finally {
+        working = false;
+        controls();
+      }
+    },
+    saveInvoices: async ({ parsed, fileHash }) => {
+      if (working) throw Error('SYNC_BUSY');
+      if (!store.connected) throw Error('GOOGLE_LOGIN_REQUIRED');
+      working = true;
+      controls();
+      try {
+        const batch = await makeInvoiceImport(parsed, { fileHash });
+        return await store.saveInvoices(batch);
       } finally {
         working = false;
         controls();

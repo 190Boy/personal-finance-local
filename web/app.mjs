@@ -1,4 +1,5 @@
 import { initCards } from './cards.mjs';
+import { initInvoices } from './invoices.mjs';
 import { initStocks } from './stocks.mjs';
 import { initCloud } from '../cloud/ui.mjs';
 import { inspectTable, parseEsunTable, TABLE_FIELDS } from '../pdf-parser/tabular.mjs';
@@ -78,7 +79,17 @@ const seenFiles = new Set(),
   seenTransactions = new Set(),
   urls = new Set();
 
-const routes = ['login', 'home', 'transactions', 'import', 'bank-import', 'stocks', 'cards', 'settings'];
+const routes = [
+  'login',
+  'home',
+  'transactions',
+  'import',
+  'bank-import',
+  'stocks',
+  'cards',
+  'invoices',
+  'settings'
+];
 function updateRoute(focus = false) {
   const requested = location.hash.slice(1);
   const route = routes.includes(requested) ? requested : 'login';
@@ -87,7 +98,9 @@ function updateRoute(focus = false) {
     view.hidden = view.dataset.route !== route;
   });
   document.querySelectorAll('[data-nav]').forEach(link => {
-    if (link.dataset.nav === (['stocks', 'bank-import', 'cards'].includes(route) ? 'import' : route))
+    if (
+      link.dataset.nav === (['stocks', 'bank-import', 'cards', 'invoices'].includes(route) ? 'import' : route)
+    )
       link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   });
@@ -666,3 +679,4 @@ void start();
 
 initStocks(cloud);
 initCards(cloud);
+initInvoices(cloud);
