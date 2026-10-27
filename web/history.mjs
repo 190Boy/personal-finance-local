@@ -123,6 +123,7 @@ function draw() {
     review.className = 'review' + (r.conflict ? ' bad' : ' muted');
     review.textContent = values[11];
     card.append(review);
+    if (r.match) card.append(...matchBlock(r.match));
     $('historyCards').append(card);
   }
   if (data.warnings?.length)
@@ -147,4 +148,32 @@ export function initHistory() {
     draw();
   });
   clearHistory();
+}
+
+// A matched invoice shows what the line on the statement actually bought.
+function matchBlock(match) {
+  const note = document.createElement('p');
+  note.className = 'muted';
+  if (!match.invoice) {
+    note.textContent = match.state === '儲值' ? '已標記為儲值，不算支出。' : '已標記為沒有發票的消費。';
+    return [note];
+  }
+  const inv = match.invoice,
+    list = document.createElement('ul');
+  list.className = 'invoice-items';
+  for (const item of inv.items) {
+    const li = document.createElement('li'),
+      name = document.createElement('span'),
+      amount = document.createElement('span');
+    if (item.amountCents < 0) li.className = 'discount';
+    name.textContent = item.name + (item.quantity && item.quantity !== '1' ? ' ×' + item.quantity : '');
+    amount.textContent = Number.isSafeInteger(item.amountCents)
+      ? (item.amountCents / 100).toLocaleString('zh-TW')
+      : '—';
+    li.append(name, amount);
+    list.append(li);
+  }
+  note.textContent =
+    '發票：' + inv.sellerName + ' · ' + (match.state === 'auto' ? '金額、日期相符自動配對' : '已確認配對');
+  return [list, note];
 }

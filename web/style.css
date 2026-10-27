@@ -755,3 +755,83 @@ footer {
 .invoice-more {
   justify-self: center;
 }
+
+.matching-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 12px 0;
+}
+.matching-stats .stat {
+  padding: 10px;
+  text-align: center;
+}
+.matching-stats .stat strong {
+  margin-top: 2px;
+  font-size: 20px;
+}
+.matching-stats .stat small {
+  font-size: 12px;
+}
+.stat.warn {
+  border-color: #e9cf9c;
+  background: #fffaf0;
+}
+#matchingBody .invoice-card {
+  margin: 10px 0;
+}
+#matchingBody .btns {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+#matchingBody .btns button {
+  min-height: 40px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+#matchingBody .btns:has(> button:only-child) {
+  grid-template-columns: 1fr;
+}
+#matchingBody .why {
+  font-size: 13px;
+  color: #775018;
+  background: #fff4de;
+  border: 1px solid #e9cf9c;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 8px 0 0;
+}
+#matchingBody .cand {
+  border: 1px dashed #aec7e0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  font-size: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+#matchingBody .cand span {
+  overflow-wrap: anywhere;
+}
+#matchingBody .cand button {
+  min-height: 34px;
+  padding: 4px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+#matchingBody details.panel > summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+.history-card .invoice-items {
+  margin-top: 8px;
+}
+@media (max-width: 420px) {
+  .matching-stats .stat small {
+    font-size: 11px;
+  }
+}

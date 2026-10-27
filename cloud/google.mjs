@@ -8,6 +8,7 @@ import {
 } from './credit-cards.mjs';
 import { rowsToAppend } from './dedup.mjs';
 import { INVOICE_HEADERS, invoiceTable, invoiceRowsToAppend, invoiceSheetRows } from './invoices.mjs';
+import { HABIT_HEADERS, DEFAULT_HABITS, DECISION_HEADERS, readHabits, computeMatches } from './matching.mjs';
 import { mergeStockTables } from './stock-layout.mjs';
 import { ledgerPlan, migrationId } from './ledger.mjs';
 import { cloudHistory } from './history.mjs';
@@ -285,11 +286,13 @@ export class GoogleStore {
       warnings.push('股票資產或紀錄轉換尚未完成：' + readReason(e));
       stocks.pending.push({ account: '股票資料', reason: '載入或轉換失敗，未列入合計' });
     }
+    let cardRowsForMatching = [];
     let credits = { totalCents: 0, accounts: [], pending: [] },
       creditHistory = { rows: [], duplicates: 0 };
     try {
       await this.cardCurrency();
       const values = cardTable(await this.read('信用卡')).rows;
+      cardRowsForMatching = values;
       credits = cardSummary(values);
       creditHistory = cardHistory(values);
     } catch (e) {
@@ -297,17 +300,38 @@ export class GoogleStore {
       warnings.push('信用卡讀取未完成：' + readReason(e));
       credits.pending.push({ bank: '信用卡', account: '', reason: '載入失敗' });
     }
+    let matching = null;
+    try {
+      if (this.sheets.some(s => s.title === '發票')) {
+        matching = computeMatches({
+          invoiceRows: invoiceTable(await this.read('發票')),
+          cardRows: cardRowsForMatching,
+          bankRows: rows,
+          habits: readHabits(await this.read('付款習慣')),
+          decisionRows: await this.read('配對紀錄')
+        });
+      }
+    } catch (e) {
+      if (e.message === 'GOOGLE_LOGIN_REQUIRED') throw e;
+      warnings.push('發票配對讀取未完成：' + readReason(e));
+    }
     const history = cloudHistory(rows, moves);
     history.rows.push(...creditHistory.rows);
     history.rows.sort(
       (a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.ordinal - a.ordinal
     );
     history.duplicates += creditHistory.duplicates;
+    if (matching)
+      for (const h of history.rows) {
+        const link = matching.recordLinks.get((h.kind === '信用卡' ? 'card:' : 'bank:') + h.id);
+        if (link) h.match = link;
+      }
     return {
       ...bankSummary(rows),
       accounts: savedAccounts(rows),
       stocks,
       credits,
+      matching,
       history: { ...history, warnings }
     };
   }
@@ -684,6 +708,51 @@ export class GoogleStore {
           throw e;
         }
         return { repeated: false, added: plan.added, skipped: plan.skipped, changed: plan.changed };
+      });
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  // Matching decisions are append-only; the latest decision per target wins when read back.
+  // The habits sheet is created with the default rules on the first decision.
+  async saveDecisions(rows) {
+    if (this.saving) throw Error('SYNC_BUSY');
+    if (!rows.length) return { added: 0 };
+    this.saving = true;
+    try {
+      await this.unifiedLog();
+      return await this.coordinated(async revision => {
+        const habitsExisted = this.sheets.some(s => s.title === '付款習慣');
+        const habits = await this.ensure('付款習慣', HABIT_HEADERS),
+          log = await this.ensure('配對紀錄', DECISION_HEADERS),
+          epoch = this.epoch,
+          fileId = this.file?.id;
+        const seed = !habitsExisted && (await this.read('付款習慣')).length === 1;
+        const requests = [
+          ...this.revisionRequests(revision),
+          ...(seed
+            ? [
+                {
+                  appendCells: {
+                    sheetId: habits.sheetId,
+                    rows: cells(DEFAULT_HABITS),
+                    fields: 'userEnteredValue'
+                  }
+                }
+              ]
+            : []),
+          { appendCells: { sheetId: log.sheetId, rows: cells(rows), fields: 'userEnteredValue' } }
+        ];
+        if (epoch !== this.epoch || fileId !== this.file?.id) throw Error('GOOGLE_LOGIN_REQUIRED');
+        try {
+          await this.api(SHEETS + '/' + fileId + ':batchUpdate', { method: 'POST', body: { requests } });
+        } catch (e) {
+          const ids = new Set((await this.read('配對紀錄')).slice(1).map(r => r[0]));
+          if (rows.every(r => ids.has(r[0]))) return { added: 0, repeated: true };
+          throw e;
+        }
+        return { added: rows.length };
       });
     } finally {
       this.saving = false;
