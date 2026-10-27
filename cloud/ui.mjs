@@ -2,6 +2,7 @@ import { makeCardImport } from './credit-cards.mjs';
 import { makeInvoiceImport } from './invoices.mjs';
 import { initHistory, renderHistory, clearHistory } from '../web/history.mjs';
 import { renderAssets } from '../web/assets.mjs';
+import { renderMatching, clearMatching } from '../web/matching.mjs';
 import { makeStockImport } from './stocks.mjs';
 import { rememberedAccount, rememberAccount } from './login-preferences.mjs';
 import { initAccounts } from './accounts.mjs';
@@ -83,6 +84,8 @@ function controls() {
   const connected = store.connected;
   $('historyConnect').textContent = working ? '正在載入…' : connected ? '重新載入交易' : '連接 Google 並載入';
   $('historyConnect').disabled = working || preparing;
+  $('matchingConnect').textContent = $('historyConnect').textContent;
+  $('matchingConnect').disabled = working || preparing;
   $('historyConnection').textContent = connected
     ? '已連接：' + (store.user?.emailAddress || '正在確認帳戶')
     : '尚未連接 Google；重開網站或授權到期後需重新連接。';
@@ -140,6 +143,7 @@ function clearSummary() {
   accountChoices?.clear();
   renderAssets(null);
   clearHistory();
+  clearMatching();
   $('bankDeposit').textContent = '尚未同步';
   $('bankDepositDetail').textContent = '連接 Google 後載入各帳戶最後餘額。';
   $('cloudSheetLink').hidden = true;
@@ -149,6 +153,7 @@ async function summary() {
   const result = await store.summary();
   renderAssets(result);
   renderHistory(result.history);
+  renderMatching(result.matching);
   accountChoices?.update(result.accounts || {});
   $('bankDeposit').textContent = result.balances.length
     ? (result.pending.length ? '部分合計 NT$ ' : 'NT$ ') +
@@ -368,6 +373,10 @@ export function initCloud({ getPayload }) {
     if (store.connected) void refresh();
     else connect();
   });
+  $('matchingConnect').addEventListener('click', () => {
+    if (store.connected) void refresh();
+    else connect();
+  });
 
   window.addEventListener('pagehide', () => {
     authAttempt++;
@@ -393,6 +402,20 @@ export function initCloud({ getPayload }) {
         controls();
       }
     },
+    saveDecisions: async rows => {
+      if (working) throw Error('SYNC_BUSY');
+      if (!store.connected) throw Error('GOOGLE_LOGIN_REQUIRED');
+      working = true;
+      controls();
+      try {
+        const saved = await store.saveDecisions(rows);
+        await summary();
+        return saved;
+      } finally {
+        working = false;
+        controls();
+      }
+    },
     saveInvoices: async ({ parsed, fileHash }) => {
       if (working) throw Error('SYNC_BUSY');
       if (!store.connected) throw Error('GOOGLE_LOGIN_REQUIRED');
@@ -400,7 +423,9 @@ export function initCloud({ getPayload }) {
       controls();
       try {
         const batch = await makeInvoiceImport(parsed, { fileHash });
-        return await store.saveInvoices(batch);
+        const saved = await store.saveInvoices(batch);
+        await summary();
+        return saved;
       } finally {
         working = false;
         controls();
