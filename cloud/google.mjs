@@ -17,6 +17,7 @@ import {
   linePayEvents,
   walletGaps
 } from './linepay.mjs';
+import { MANUAL_HEADERS, manualTable, manualSheetRows, manualEntries, manualHistoryRow } from './manual.mjs';
 import { mergeStockTables } from './stock-layout.mjs';
 import { ledgerPlan, migrationId } from './ledger.mjs';
 import { cloudHistory } from './history.mjs';
@@ -308,9 +309,16 @@ export class GoogleStore {
       warnings.push('信用卡讀取未完成：' + readReason(e));
       credits.pending.push({ bank: '信用卡', account: '', reason: '載入失敗' });
     }
-    let matching = null;
+    let matching = null,
+      manual = [];
     try {
-      if (this.sheets.some(s => ['發票', 'LINE Pay'].includes(s.title))) {
+      manual = manualEntries(manualTable(await this.read('手動記帳')));
+    } catch (e) {
+      if (e.message === 'GOOGLE_LOGIN_REQUIRED') throw e;
+      warnings.push('手動記帳讀取未完成：' + readReason(e));
+    }
+    try {
+      if (this.sheets.some(s => ['發票', 'LINE Pay', '手動記帳'].includes(s.title))) {
         const events = linePayEvents(linePayTable(await this.read('LINE Pay')));
         matching = computeMatches({
           invoiceRows: invoiceTable(await this.read('發票')),
@@ -319,7 +327,8 @@ export class GoogleStore {
           habits: readHabits(await this.read('付款習慣')),
           decisionRows: await this.read('配對紀錄'),
           linePayEvents: events,
-          wallet: events.length ? walletGaps(events, rows) : null
+          wallet: events.length ? walletGaps(events, rows) : null,
+          manualEntries: manual
         });
       }
     } catch (e) {
@@ -332,6 +341,11 @@ export class GoogleStore {
       (a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.ordinal - a.ordinal
     );
     history.duplicates += creditHistory.duplicates;
+    manual.forEach((e, n) => history.rows.push(manualHistoryRow(e, n)));
+    if (!matching)
+      history.rows.sort(
+        (a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.ordinal - a.ordinal
+      );
     if (matching) {
       // Wallet payments and the gaps the user explained are spending the statements never show.
       matching.walletRecords.forEach((r, n) =>
@@ -355,7 +369,8 @@ export class GoogleStore {
         })
       );
       for (const g of matching.wallet?.gaps || [])
-        if (g.label)
+        // A gap explained by a hand-entered record is already in the history through that record.
+        if (g.label && g.label !== '已手動補記')
           history.rows.push({
             kind: 'LINE Pay',
             id: g.id,
@@ -374,7 +389,7 @@ export class GoogleStore {
             ordinal: 0,
             financial: g.id
           });
-      const prefix = { 信用卡: 'card:', 銀行存款: 'bank:', 'LINE Pay': 'linepay:' };
+      const prefix = { 信用卡: 'card:', 銀行存款: 'bank:', 'LINE Pay': 'linepay:', 手動記帳: 'manual:' };
       for (const h of history.rows) {
         const link = matching.recordLinks.get(prefix[h.kind] + h.id);
         if (link) h.match = link;
@@ -390,6 +405,7 @@ export class GoogleStore {
       stocks,
       credits,
       matching,
+      manual,
       history: { ...history, warnings }
     };
   }
@@ -861,6 +877,47 @@ export class GoogleStore {
           throw e;
         }
         return { repeated: false, added: plan.fresh.length, skipped: plan.skipped };
+      });
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  // Hand-entered records are append-only like the decisions; a decision can be saved in the same batch,
+  // e.g. marking the wallet gap the record explains.
+  async saveManual(rows, decisions = []) {
+    if (this.saving) throw Error('SYNC_BUSY');
+    if (!rows.length) return { added: 0 };
+    this.saving = true;
+    try {
+      await this.unifiedLog();
+      return await this.coordinated(async revision => {
+        const sheet = await this.ensure('手動記帳', MANUAL_HEADERS),
+          log = decisions.length ? await this.ensure('配對紀錄', DECISION_HEADERS) : null,
+          epoch = this.epoch,
+          fileId = this.file?.id;
+        const requests = [
+          ...this.revisionRequests(revision),
+          {
+            appendCells: {
+              sheetId: sheet.sheetId,
+              rows: cells(manualSheetRows(rows)),
+              fields: 'userEnteredValue'
+            }
+          },
+          ...(log
+            ? [{ appendCells: { sheetId: log.sheetId, rows: cells(decisions), fields: 'userEnteredValue' } }]
+            : [])
+        ];
+        if (epoch !== this.epoch || fileId !== this.file?.id) throw Error('GOOGLE_LOGIN_REQUIRED');
+        try {
+          await this.api(SHEETS + '/' + fileId + ':batchUpdate', { method: 'POST', body: { requests } });
+        } catch (e) {
+          const saved = new Set((await this.read('手動記帳')).slice(1).map(r => r[0] + '|' + r[10]));
+          if (rows.every(r => saved.has(r[0] + '|' + r[10]))) return { added: 0, repeated: true };
+          throw e;
+        }
+        return { added: rows.length };
       });
     } finally {
       this.saving = false;
