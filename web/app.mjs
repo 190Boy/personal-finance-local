@@ -1,6 +1,7 @@
 import { initCards } from './cards.mjs';
 import { initInvoices } from './invoices.mjs';
 import { initMatching } from './matching.mjs';
+import { initLinePay } from './linepay.mjs';
 import { initStocks } from './stocks.mjs';
 import { initCloud } from '../cloud/ui.mjs';
 import { inspectTable, parseEsunTable, TABLE_FIELDS } from '../pdf-parser/tabular.mjs';
@@ -89,6 +90,7 @@ const routes = [
   'stocks',
   'cards',
   'invoices',
+  'linepay',
   'matching',
   'settings'
 ];
@@ -102,7 +104,7 @@ function updateRoute(focus = false) {
   document.querySelectorAll('[data-nav]').forEach(link => {
     if (
       link.dataset.nav ===
-      (['stocks', 'bank-import', 'cards', 'invoices'].includes(route)
+      (['stocks', 'bank-import', 'cards', 'invoices', 'linepay'].includes(route)
         ? 'import'
         : route === 'matching'
           ? 'transactions'
@@ -688,3 +690,4 @@ initStocks(cloud);
 initCards(cloud);
 initInvoices(cloud);
 initMatching(cloud);
+initLinePay(cloud);

@@ -1,4 +1,5 @@
 import { decisionRow, PAYMENT_METHODS } from '../cloud/matching.mjs';
+import { GAP_LABELS } from '../cloud/linepay.mjs';
 import { hash } from '../cloud/records.mjs';
 const $ = id => document.getElementById(id);
 const money = c =>
@@ -94,6 +95,81 @@ function section(title, note) {
   return s;
 }
 
+// LINE Pay wallet: money that moved without a notification, found from the balance after each payment.
+function gapText(g) {
+  const at = e => md(e.date) + ' ' + e.time + ' ' + (e.shop || e.type);
+  return at(g.from) + ' → ' + at(g.to);
+}
+function walletSection(w) {
+  const s = section(
+    'LINE 錢包餘額落差',
+    '相鄰兩則通知之間，錢包餘額和通知金額對不上，代表有沒發通知的錢進出（例如好友轉帳）。' +
+      (w.lastBalance
+        ? '最後一筆通知的餘額 ' + money(w.lastBalance.cents) + ' 元（' + w.lastBalance.date + '）。'
+        : '')
+  );
+  const open = w.gaps.filter(g => !g.label && !g.explainedBy),
+    done = w.gaps.filter(g => g.label || g.explainedBy);
+  if (!open.length)
+    s.append(el('p', w.gaps.length ? '這段期間的落差都已說明。' : '這段期間沒有落差。', 'muted'));
+  for (const g of open) {
+    const card = el('article', null, 'invoice-card');
+    const top = el('div', null, 'top');
+    top.append(
+      el('h3', g.direction === 'out' ? '錢包少了' : '錢包多了'),
+      el('span', (g.direction === 'out' ? '−' : '+') + money(g.amountCents) + ' 元', 'amount')
+    );
+    card.append(top, el('p', gapText(g), 'meta'));
+    const actions = el('div', null, 'gap-actions');
+    for (const label of GAP_LABELS[g.direction])
+      actions.append(
+        button(
+          label,
+          () =>
+            decide(
+              [{ type: 'LINE錢包', target: g.id, action: '落差', method: label }],
+              '已標記為「' + label + '」。'
+            ),
+          label !== GAP_LABELS[g.direction][0]
+        )
+      );
+    card.append(actions);
+    s.append(card);
+  }
+  if (done.length) {
+    const d = el('details');
+    d.append(el('summary', '已說明（' + done.length + ' 筆）'));
+    for (const g of done) {
+      const row = el('div', null, 'cand');
+      row.append(
+        el(
+          'span',
+          (g.direction === 'out' ? '−' : '+') +
+            money(g.amountCents) +
+            ' 元　' +
+            gapText(g) +
+            '　' +
+            (g.label || '自動：' + g.explainedBy.label)
+        )
+      );
+      if (g.label)
+        row.append(
+          button(
+            '取消',
+            () => decide([{ type: 'LINE錢包', target: g.id, action: '撤銷' }], '已取消標記。'),
+            true
+          )
+        );
+      d.append(row);
+    }
+    s.append(d);
+  }
+  if (w.older)
+    s.append(
+      el('p', w.since + ' 之前另有 ' + w.older + ' 筆落差，因為沒有銀行明細可以對照，不列出。', 'muted')
+    );
+  return s;
+}
 function render() {
   const box = $('matchingBody');
   box.replaceChildren();
@@ -236,6 +312,8 @@ function render() {
     }
     box.append(s);
   }
+
+  if (data.wallet) box.append(walletSection(data.wallet));
 
   const waiting = by('waiting');
   if (waiting.length) {

@@ -835,3 +835,15 @@ footer {
     font-size: 11px;
   }
 }
+
+#matchingBody .gap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+#matchingBody .gap-actions button {
+  min-height: 38px;
+  padding: 6px 12px;
+  font-size: 14px;
+}

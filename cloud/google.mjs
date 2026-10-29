@@ -9,6 +9,14 @@ import {
 import { rowsToAppend } from './dedup.mjs';
 import { INVOICE_HEADERS, invoiceTable, invoiceRowsToAppend, invoiceSheetRows } from './invoices.mjs';
 import { HABIT_HEADERS, DEFAULT_HABITS, DECISION_HEADERS, readHabits, computeMatches } from './matching.mjs';
+import {
+  LINEPAY_HEADERS,
+  linePayTable,
+  linePayRowsToAppend,
+  linePaySheetRows,
+  linePayEvents,
+  walletGaps
+} from './linepay.mjs';
 import { mergeStockTables } from './stock-layout.mjs';
 import { ledgerPlan, migrationId } from './ledger.mjs';
 import { cloudHistory } from './history.mjs';
@@ -302,13 +310,16 @@ export class GoogleStore {
     }
     let matching = null;
     try {
-      if (this.sheets.some(s => s.title === '發票')) {
+      if (this.sheets.some(s => ['發票', 'LINE Pay'].includes(s.title))) {
+        const events = linePayEvents(linePayTable(await this.read('LINE Pay')));
         matching = computeMatches({
           invoiceRows: invoiceTable(await this.read('發票')),
           cardRows: cardRowsForMatching,
           bankRows: rows,
           habits: readHabits(await this.read('付款習慣')),
-          decisionRows: await this.read('配對紀錄')
+          decisionRows: await this.read('配對紀錄'),
+          linePayEvents: events,
+          wallet: events.length ? walletGaps(events, rows) : null
         });
       }
     } catch (e) {
@@ -321,11 +332,57 @@ export class GoogleStore {
       (a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.ordinal - a.ordinal
     );
     history.duplicates += creditHistory.duplicates;
-    if (matching)
+    if (matching) {
+      // Wallet payments and the gaps the user explained are spending the statements never show.
+      matching.walletRecords.forEach((r, n) =>
+        history.rows.push({
+          kind: 'LINE Pay',
+          id: r.key.slice('linepay:'.length),
+          source: 'LINE Pay',
+          account: '錢包',
+          date: r.date,
+          time: r.time,
+          code: '',
+          summary: r.summary,
+          expense: r.amountCents / 100,
+          income: null,
+          fee: null,
+          balance: null,
+          review: '錢包付款',
+          conflict: false,
+          ordinal: n,
+          financial: r.key
+        })
+      );
+      for (const g of matching.wallet?.gaps || [])
+        if (g.label)
+          history.rows.push({
+            kind: 'LINE Pay',
+            id: g.id,
+            source: 'LINE Pay',
+            account: '錢包',
+            date: g.to.date,
+            time: g.to.time,
+            code: '',
+            summary: g.label + '（錢包餘額落差，' + g.from.date.slice(5) + '～' + g.to.date.slice(5) + '）',
+            expense: g.direction === 'out' ? g.amountCents / 100 : null,
+            income: g.direction === 'in' ? g.amountCents / 100 : null,
+            fee: null,
+            balance: null,
+            review: '依錢包餘額推算，沒有通知',
+            conflict: false,
+            ordinal: 0,
+            financial: g.id
+          });
+      const prefix = { 信用卡: 'card:', 銀行存款: 'bank:', 'LINE Pay': 'linepay:' };
       for (const h of history.rows) {
-        const link = matching.recordLinks.get((h.kind === '信用卡' ? 'card:' : 'bank:') + h.id);
+        const link = matching.recordLinks.get(prefix[h.kind] + h.id);
         if (link) h.match = link;
       }
+      history.rows.sort(
+        (a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.ordinal - a.ordinal
+      );
+    }
     return {
       ...bankSummary(rows),
       accounts: savedAccounts(rows),
@@ -754,6 +811,56 @@ export class GoogleStore {
           throw e;
         }
         return { added: rows.length };
+      });
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  async saveLinePay(batch) {
+    if (this.saving) throw Error('SYNC_BUSY');
+    this.saving = true;
+    try {
+      await this.unifiedLog();
+      return await this.coordinated(async revision => {
+        const sheet = await this.ensure('LINE Pay', LINEPAY_HEADERS);
+        const epoch = this.epoch,
+          fileId = this.file?.id,
+          logs = (await this.read('匯入紀錄')).slice(1);
+        if (logs.some(r => r[0] === batch.id)) return { repeated: true, added: 0, skipped: 0 };
+        const plan = linePayRowsToAppend(linePayTable(await this.read('LINE Pay')), batch.rows),
+          log = [...batch.log];
+        log[6] = plan.fresh.length;
+        const requests = [
+          ...this.revisionRequests(revision),
+          ...(plan.fresh.length
+            ? [
+                {
+                  appendCells: {
+                    sheetId: sheet.sheetId,
+                    rows: cells(linePaySheetRows(plan.fresh)),
+                    fields: 'userEnteredValue'
+                  }
+                }
+              ]
+            : []),
+          {
+            appendCells: {
+              sheetId: this.sheets.find(s => s.title === '匯入紀錄').sheetId,
+              rows: cells([log]),
+              fields: 'userEnteredValue'
+            }
+          }
+        ];
+        if (epoch !== this.epoch || fileId !== this.file?.id) throw Error('GOOGLE_LOGIN_REQUIRED');
+        try {
+          await this.api(SHEETS + '/' + fileId + ':batchUpdate', { method: 'POST', body: { requests } });
+        } catch (e) {
+          if ((await this.read('匯入紀錄')).slice(1).some(r => r[0] === batch.id))
+            return { repeated: true, added: 0, skipped: 0 };
+          throw e;
+        }
+        return { repeated: false, added: plan.fresh.length, skipped: plan.skipped };
       });
     } finally {
       this.saving = false;
