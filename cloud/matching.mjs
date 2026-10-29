@@ -40,6 +40,8 @@ const BRAND_ALIASES = [
   [/智冠科技/, ['智冠', 'mycard']]
 ];
 export const TOPUP_HINT = '連結帳戶交易';
+// Up to 5 dollars: plastic bags and similar small items are often charged but left off the e-invoice.
+export const SMALL_EXTRA_CENTS = 500;
 
 function brandWords(inv) {
   const words = new Set();
@@ -263,12 +265,30 @@ export function computeMatches({
   const claims = new Map();
   for (const [id, list] of candidates)
     for (const c of list) claims.set(c.record.key, [...(claims.get(c.record.key) || []), id]);
+  // 2b. A charge a few dollars above the invoice (a plastic bag rung up outside the invoice) is offered,
+  // never paired automatically, and only when nothing matches exactly on either side.
+  for (const inv of invoices) {
+    if (result.has(inv.id) || inv.platform || candidates.get(inv.id)?.length) continue;
+    const list = [];
+    for (const r of records) {
+      if (!free(r) || claims.has(r.key) || rejected.has(inv.id + '|' + r.key)) continue;
+      const diff = days(inv.date, r.date),
+        extra = r.amountCents - inv.totalCents;
+      if (extra <= 0 || extra > SMALL_EXTRA_CENTS || diff < -1 || diff > 3) continue;
+      let score = 4 - Math.abs(diff) * 2 - extra / 100;
+      if (nameMatches(inv, r.summary)) score += 5;
+      if (inv.habit?.recordHint && norm(r.summary).includes(norm(inv.habit.recordHint))) score += 5;
+      list.push({ record: { ...r, extraCents: extra }, score, near: true });
+    }
+    list.sort((a, b) => b.score - a.score);
+    if (list.length) candidates.set(inv.id, list);
+  }
   // 3. Automatic only when the pairing is unique in both directions and not a platform fee invoice.
   for (const inv of invoices) {
     if (result.has(inv.id)) continue;
     const list = candidates.get(inv.id) || [];
     const covered = cover.end && inv.date >= cover.start && inv.date <= cover.end;
-    if (list.length === 1 && !inv.platform && claims.get(list[0].record.key).length === 1) {
+    if (list.length === 1 && !inv.platform && !list[0].near && claims.get(list[0].record.key).length === 1) {
       taken.set(list[0].record.key, inv.id);
       result.set(inv.id, { state: 'auto', record: list[0].record });
     } else if (list.length) result.set(inv.id, { state: 'choose', candidates: list.map(c => c.record) });
@@ -303,7 +323,12 @@ export function computeMatches({
   const recordLinks = new Map();
   for (const inv of invoices) {
     const m = result.get(inv.id);
-    if (m.record) recordLinks.set(m.record.key, { invoice: inv, state: m.state });
+    if (m.record)
+      recordLinks.set(m.record.key, {
+        invoice: inv,
+        state: m.state,
+        extraCents: m.record.amountCents - inv.totalCents
+      });
   }
   for (const [key, d] of exclusive)
     if (byKey.has(key) && ['儲值', '無發票'].includes(d.action)) recordLinks.set(key, { state: d.action });

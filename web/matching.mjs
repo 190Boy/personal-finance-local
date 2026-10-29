@@ -168,7 +168,16 @@ function render() {
       for (const r of inv.candidates) {
         const row = el('div', null, 'cand');
         row.append(
-          el('span', recordLabel(r) + '　' + money(r.amountCents) + ' 元'),
+          el(
+            'span',
+            recordLabel(r) +
+              '　' +
+              money(r.amountCents) +
+              ' 元' +
+              (r.extraCents
+                ? '（比發票多 ' + money(r.extraCents) + ' 元，可能是塑膠袋等沒開進發票的小額）'
+                : '')
+          ),
           button('是這筆', () =>
             decide(
               [{ type: '發票', target: inv.id, action: '配對', other: r.key, method: r.kind }],

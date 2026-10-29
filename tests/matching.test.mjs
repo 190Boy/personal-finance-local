@@ -303,3 +303,44 @@ test('without an invoice sheet the summary has no matching section and nothing i
   assert.equal((await store.summary()).matching, null);
   assert.ok(!tables['付款習慣'] && !tables['配對紀錄']);
 });
+
+test('a charge a few dollars above the invoice is offered but never paired automatically', async () => {
+  const text =
+    CSV + '\n' + inv('20261012', 'AA00000012', 75, '統一超商股份有限公司虛構第二分公司', '11111113', '飯糰');
+  const cards = [...CARDS, card('c3', '2026-10-12', '連支*統一超商', 77)];
+  const m = computeMatches({ invoiceRows: await invoiceRows(text), cardRows: cards, bankRows: BANK });
+  const near = byNo(m, 'AA00000012');
+  assert.equal(near.state, 'choose');
+  assert.deepEqual(
+    near.candidates.map(r => [r.key, r.extraCents]),
+    [['card:c3', 200]]
+  );
+  // Too large a gap, or a record already matched exactly elsewhere, is not offered.
+  const far = computeMatches({
+    invoiceRows: await invoiceRows(text),
+    cardRows: [...CARDS, card('c3', '2026-10-12', '連支*統一超商', 85)],
+    bankRows: BANK
+  });
+  assert.notEqual(byNo(far, 'AA00000012').state, 'choose');
+  const exact = computeMatches({
+    invoiceRows: await invoiceRows(
+      text +
+        '\n' +
+        inv('20261012', 'AA00000013', 77, '統一超商股份有限公司虛構第三分公司', '11111114', '便當')
+    ),
+    cardRows: cards,
+    bankRows: BANK
+  });
+  assert.equal(byNo(exact, 'AA00000013').state, 'auto');
+  assert.notEqual(byNo(exact, 'AA00000012').state, 'choose');
+  // Once confirmed, the history link records the extra amount.
+  const rows = await invoiceRows(text),
+    id = rows.find(r => r[0] === '發票' && r[C['發票號碼']] === 'AA00000012')[C['發票紀錄ID']];
+  const confirmed = computeMatches({
+    invoiceRows: rows,
+    cardRows: cards,
+    bankRows: BANK,
+    decisionRows: [DECISION_HEADERS, decision('發票', id, '配對', 'card:c3', '信用卡')]
+  });
+  assert.equal(confirmed.recordLinks.get('card:c3').extraCents, 200);
+});
