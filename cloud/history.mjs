@@ -56,14 +56,23 @@ export function cloudHistory(bankRows, stockRows) {
   out.sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.ordinal - a.ordinal);
   return { rows: out, duplicates };
 }
-export function filterHistory(rows, { kind = '', account = '', query = '', from = '', to = '' } = {}) {
+export function filterHistory(
+  rows,
+  { kind = '', account = '', query = '', from = '', to = '', month = '', category = '' } = {}
+) {
   const q = query.trim().toLocaleLowerCase();
   return rows.filter(
     r =>
       (!kind || r.kind === kind) &&
+      (!month || String(r.date).startsWith(month)) &&
+      (!category || String(r.category || '').split('／')[0] === category) &&
       (!account || JSON.stringify([r.source, r.account]) === account) &&
       (!from || r.date >= from) &&
       (!to || r.date <= to) &&
-      (!q || [r.source, r.account, r.code, r.summary, r.review].join(' ').toLocaleLowerCase().includes(q))
+      (!q ||
+        [r.source, r.account, r.code, r.summary, r.review, r.category]
+          .join(' ')
+          .toLocaleLowerCase()
+          .includes(q))
   );
 }
