@@ -268,6 +268,7 @@ test('summary carries matches into history; decisions seed habits and change the
   await store.metadata();
   let r = await store.summary();
   assert.equal(r.matching.counts.auto, 4);
+  assert.deepEqual(r.cardAccounts, { 中國信託: ['中信信用卡'], 凱基銀行: ['凱基信用卡'] });
   const link = r.history.rows.find(h => h.kind === '信用卡' && h.id === 'c1').match;
   assert.equal(link.invoice.items[0].name, '綠茶');
   const familymart = r.matching.invoices.find(i => i.number === 'AA00000005');

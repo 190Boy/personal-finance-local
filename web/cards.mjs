@@ -28,6 +28,46 @@ const messages = {
   EXCEL_PASSWORD_REQUIRED: 'Excel 需要開啟密碼，請輸入後重試。',
   EXCEL_WRONG_PASSWORD: 'Excel 密碼錯誤，請重新輸入。'
 };
+
+// Saved card accounts per bank, from the 信用卡 sheet. A different alias is treated as another card,
+// so overlapping imports would not be de-duplicated; the picker keeps the name identical.
+const CARD_BANK_NAMES = { kgi: '凱基銀行', ctbc: '中國信託' };
+let cardAccounts = {},
+  loaded = false;
+function drawCardAccounts() {
+  const select = $('cardAccountSelect'),
+    input = $('cardAccount');
+  if (!select) return;
+  const names = cardAccounts[CARD_BANK_NAMES[$('cardBank').value]] || [];
+  if (!input.value.trim() && names.length === 1) input.value = names[0];
+  const chosen = input.value.trim();
+  select.replaceChildren(
+    new Option(
+      !loaded
+        ? '連接 Google 後載入'
+        : names.length
+          ? '新增帳戶（在下方輸入）'
+          : '尚無這家銀行的信用卡帳戶，請在下方新增',
+      ''
+    ),
+    ...names.map(n => new Option(n, n))
+  );
+  select.value = names.includes(chosen) ? chosen : '';
+  $('cardAccountHint').textContent = !loaded
+    ? '連接 Google 後可以從清單選擇已用過的帳戶代稱。'
+    : names.includes(chosen)
+      ? '已選擇雲端帳戶：' + chosen + '。重疊的交易會自動排重。'
+      : chosen && names.length
+        ? '這是新的帳戶代稱。和既有帳戶名稱不同會被當成另一張卡，重疊的交易不會排重；同一張卡請從清單選擇。'
+        : names.length > 1
+          ? '這家銀行有多個信用卡帳戶，請選擇本次帳單屬於哪一個。'
+          : '第一次匯入這家銀行的信用卡，請輸入帳戶代稱，之後就能從清單選擇。';
+}
+export function setCardAccounts(accounts, isLoaded = true) {
+  cardAccounts = accounts || {};
+  loaded = isLoaded;
+  drawCardAccounts();
+}
 export function initCards(cloud) {
   let parsed = null,
     digest = '',
@@ -47,6 +87,7 @@ export function initCards(cloud) {
   const inputIds = ['cardBank', 'cardFile', 'cardPassword', 'cardAccount', ...metaIds, 'cardConsent'];
   function controls() {
     for (const id of inputIds) $(id).disabled = busy;
+    $('cardAccountSelect').disabled = busy;
     for (const e of $('cardPreview').querySelectorAll('select')) e.disabled = busy;
     $('cardParse').disabled = busy;
     $('cardSave').disabled = busy || !parsed || !$('cardConsent').checked;
@@ -75,6 +116,7 @@ export function initCards(cloud) {
     discard();
     $('cardFile').value = '';
     $('cardAccount').value = '';
+    drawCardAccounts();
     $('cardStatus').textContent = '已清除信用卡檔案與預覽。';
   }
   function source() {
@@ -88,6 +130,19 @@ export function initCards(cloud) {
       : '請選擇中信信用卡 CSV；僅依欄位識別版型，銀行由你確認。';
   }
   $('cardBank').addEventListener('change', source);
+  $('cardBank').addEventListener('change', () => {
+    // An alias from the other bank would silently create a new card account.
+    const names = cardAccounts[CARD_BANK_NAMES[$('cardBank').value]] || [];
+    if (!names.includes($('cardAccount').value.trim())) $('cardAccount').value = '';
+    drawCardAccounts();
+  });
+  $('cardAccountSelect').addEventListener('change', () => {
+    $('cardAccount').value = $('cardAccountSelect').value;
+    $('cardConsent').checked = false;
+    drawCardAccounts();
+    controls();
+  });
+  $('cardAccount').addEventListener('input', drawCardAccounts);
   $('cardFile').addEventListener('change', () => {
     discard();
     $('cardStatus').textContent = '檔案已更換，請重新讀取。';
@@ -252,4 +307,5 @@ export function initCards(cloud) {
     if (document.hidden) $('cardPassword').value = '';
   });
   source();
+  drawCardAccounts();
 }

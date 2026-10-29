@@ -329,6 +329,7 @@ export class GoogleStore {
     return {
       ...bankSummary(rows),
       accounts: savedAccounts(rows),
+      cardAccounts: savedAccounts(cardRowsForMatching.map(r => ['', r[3], r[4]])),
       stocks,
       credits,
       matching,
