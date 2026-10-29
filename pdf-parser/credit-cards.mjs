@@ -94,8 +94,82 @@ function hint(summary, cents) {
   if (/預借|回饋|折抵|調整|沖正|溢繳|代償/.test(summary)) return '待核對';
   return cents > 0 ? '消費' : '待核對';
 }
+// 中信「未出帳單明細」: the location is padded onto the summary ("連支＊統一超商     Taipei   TW") instead of
+// having its own column as in the billed export. Splitting it off keeps the same transaction's identity
+// identical in both exports, so the later billed statement de-duplicates against it.
+const CTBC_UNBILLED = ['交易序號', '消費日', '入帳日', '摘要', '卡號末四碼', '新臺幣金額'];
+export function splitCardLocation(summary) {
+  // The export pads the summary to a fixed width, so the location always follows two or more spaces.
+  // Single spaces belong to the shop name ("肯德基 KFC") and are never split.
+  const m = summary.match(/^(.*?\S)\s{2,}(\S.*)$/);
+  return m ? { summary: m[1], location: m[2].replace(/\s+/g, ' ') } : { summary, location: '' };
+}
+function findHeader(book, fields) {
+  const matches = [];
+  for (const s of book.sheets)
+    for (let i = 0; i < Math.min(40, s.rows.length); i++)
+      if (fields.every((name, j) => norm(s.rows[i].cells[j]) === name)) matches.push({ s, i });
+  return matches;
+}
+function parseCtbcUnbilled(book, { s, i }) {
+  const transactions = [],
+    stamp = s.rows
+      .slice(0, i)
+      .map(r => norm(r.cells[0]))
+      .find(v => v.startsWith('資料時間'));
+  for (const r of s.rows.slice(i + 1)) {
+    if (r.cells.every(v => !norm(v))) continue;
+    const date = cardDate(r.cells[1]),
+      post = cardDate(r.cells[2]),
+      { summary } = splitCardLocation(norm(r.cells[3])),
+      amountCents = cardMoney(r.cells[5]),
+      errors = [];
+    if (!date) errors.push('消費日無效');
+    if (!post) errors.push('入帳日無效');
+    if (!summary) errors.push('缺少摘要');
+    if (amountCents === null) errors.push('臺幣金額無效');
+    const kind = hint(summary, amountCents);
+    if (kind === '待核對') errors.push('金額方向或調整用途待核對');
+    if (kind === '繳款' && amountCents >= 0) errors.push('繳款金額方向待核對');
+    if (kind === '退款' && amountCents >= 0) errors.push('退款金額方向待核對');
+    transactions.push({
+      date: date || '',
+      postingDate: post || '',
+      summary,
+      amountCents,
+      kind,
+      currency: '',
+      foreignAmount: '',
+      line: r.line,
+      errors
+    });
+  }
+  if (!transactions.length) throw Error('CARD_EMPTY');
+  const detailNetCents = transactions.every(t => Number.isSafeInteger(t.amountCents))
+    ? transactions.reduce((sum, t) => sum + t.amountCents, 0)
+    : null;
+  return {
+    bank: '中國信託',
+    source: 'csv',
+    unbilled: true,
+    exportedAt: stamp ? stamp.replace(/^資料時間[:：]\s*/, '') : '',
+    meta: { month: '', closing: '', due: '', sourceTotalCents: null, minimumCents: null },
+    transactions,
+    issues: [
+      '未出帳明細：帳單尚未結帳，請填寫這些消費將出現在哪個月份的帳單。之後匯入正式帳單時，相同交易會自動略過。'
+    ],
+    detailNetCents,
+    sourceTotalMatches: null,
+    encoding: book.encoding || ''
+  };
+}
 export function parseCardBook(book, { bank }) {
   if (!['kgi', 'ctbc'].includes(bank)) throw Error('CARD_BANK');
+  if (bank === 'ctbc') {
+    const unbilled = findHeader(book, CTBC_UNBILLED);
+    if (unbilled.length > 1) throw Error('CARD_MULTIPLE');
+    if (unbilled.length === 1) return parseCtbcUnbilled(book, unbilled[0]);
+  }
   const fields =
     bank === 'kgi'
       ? ['月份', '特店名稱', '消費日期', '消費金額', '卡號末四碼', '消費地', '入帳日期', '消費幣別']

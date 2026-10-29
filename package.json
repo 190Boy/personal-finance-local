@@ -1,6 +1,6 @@
 {
   "name": "finance-local-pdf-lab",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "private": true,
   "description": "Local-only PDF.js bank statement parsing experiment",
   "scripts": {
