@@ -173,7 +173,18 @@ function matchBlock(match) {
     li.append(name, amount);
     list.append(li);
   }
+  const platform = /優食台灣|優步福爾摩沙/.test(inv.sellerName);
   note.textContent =
-    '發票：' + inv.sellerName + ' · ' + (match.state === 'auto' ? '金額、日期相符自動配對' : '已確認配對');
+    '發票：' +
+    inv.sellerName +
+    ' · ' +
+    (match.state === 'auto' ? '金額、日期相符自動配對' : '已確認配對') +
+    (platform
+      ? ' · 發票只含平台費，餐點或車資另計'
+      : match.extraCents > 0
+        ? ' · 刷卡比發票多 ' +
+          (match.extraCents / 100).toLocaleString('zh-TW') +
+          ' 元（沒開進發票的小額，例如塑膠袋）'
+        : '');
   return [list, note];
 }
