@@ -344,3 +344,18 @@ test('a charge a few dollars above the invoice is offered but never paired autom
   });
   assert.equal(confirmed.recordLinks.get('card:c3').extraCents, 200);
 });
+
+test('an online order charged two days before its invoice still pairs', async () => {
+  const text =
+    CSV + '\n' + inv('20261020', 'AA00000014', 599, '富邦媒體科技股份有限公司', '27365925', '褲子');
+  const m = computeMatches({
+    invoiceRows: await invoiceRows(text),
+    cardRows: [
+      ...CARDS,
+      card('k9', '2026-10-18', 'momo*虛構服飾', 599, '凱基信用卡', '2026-10-18', '凱基銀行')
+    ],
+    bankRows: BANK
+  });
+  assert.equal(byNo(m, 'AA00000014').state, 'auto');
+  assert.equal(byNo(m, 'AA00000014').record.key, 'card:k9');
+});
