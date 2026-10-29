@@ -153,6 +153,23 @@ export function spendingRecords(cardRows, bankRows) {
   return out.filter(r => /^\d{4}-\d{2}-\d{2}$/.test(r.date));
 }
 
+// LINE Pay wallet payments from the LINE 錢包 chat. Card-paid LINE Pay notices duplicate the card statement's
+// 「連支*」 lines, so only wallet payments become records.
+export function walletRecords(events) {
+  return events
+    .filter(e => e.type === '付款' && e.method === '錢包' && e.amountCents > 0)
+    .map(e => ({
+      key: 'linepay:' + e.id,
+      kind: 'LINE Pay',
+      source: 'LINE Pay',
+      account: '錢包',
+      date: e.date,
+      time: e.time,
+      summary: e.shop,
+      amountCents: e.amountCents
+    }));
+}
+
 // Exclusive decisions: the latest per target wins; 「撤銷」 clears it. Rejections accumulate.
 export function readDecisions(values) {
   if (values.length && JSON.stringify(values[0]) !== JSON.stringify(DECISION_HEADERS))
@@ -208,10 +225,13 @@ export function computeMatches({
   cardRows = [],
   bankRows = [],
   habits = DEFAULT_HABITS.map(toHabit),
-  decisionRows = []
+  decisionRows = [],
+  linePayEvents = [],
+  wallet = null
 }) {
+  const topupKeys = wallet?.topupKeys || new Set();
   const all = latestInvoices(invoiceRows),
-    records = spendingRecords(cardRows, bankRows),
+    records = [...spendingRecords(cardRows, bankRows), ...walletRecords(linePayEvents)],
     byKey = new Map(records.map(r => [r.key, r])),
     { exclusive, rejected } = readDecisions(decisionRows),
     cover = coverage(records),
@@ -232,7 +252,10 @@ export function computeMatches({
     } else if (d?.action === '付款方式') result.set(inv.id, { state: 'settled', method: d.method });
   }
   const recordDecision = key => exclusive.get(key)?.action;
-  const free = r => !taken.has(r.key) && !['儲值', '無發票'].includes(recordDecision(r.key));
+  // A linked-account debit that explains an unannounced wallet top-up is not a purchase, unless the user said so.
+  const autoTopup = key => topupKeys.has(key) && !recordDecision(key);
+  const free = r =>
+    !taken.has(r.key) && !['儲值', '無發票'].includes(recordDecision(r.key)) && !autoTopup(r.key);
   // 2. Candidates by amount and date; names and habits only rank them.
   const candidates = new Map();
   for (const inv of invoices) {
@@ -315,6 +338,7 @@ export function computeMatches({
         r.summary.includes(TOPUP_HINT) &&
         !taken.has(r.key) &&
         !recordDecision(r.key) &&
+        !autoTopup(r.key) &&
         !claims.has(r.key) &&
         invoiceDates.length &&
         r.date >= invoiceDates[0] &&
@@ -333,12 +357,25 @@ export function computeMatches({
   }
   for (const [key, d] of exclusive)
     if (byKey.has(key) && ['儲值', '無發票'].includes(d.action)) recordLinks.set(key, { state: d.action });
+  for (const key of topupKeys)
+    if (byKey.has(key) && autoTopup(key)) recordLinks.set(key, { state: '儲值', auto: true });
+  const walletResult = wallet
+    ? {
+        ...wallet,
+        gaps: wallet.gaps.map(g => {
+          const d = exclusive.get(g.id);
+          return d?.action === '落差' ? { ...g, label: d.method } : g;
+        })
+      }
+    : null;
   const list = invoices
     .map(inv => ({ ...inv, ...result.get(inv.id) }))
     .sort((a, b) => b.date.localeCompare(a.date) || a.number.localeCompare(b.number));
   const count = s => list.filter(i => i.state === s).length;
   return {
     invoices: list,
+    wallet: walletResult,
+    walletRecords: records.filter(r => r.kind === 'LINE Pay'),
     questions,
     recordLinks,
     coverage: cover,

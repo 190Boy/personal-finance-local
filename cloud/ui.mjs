@@ -1,5 +1,6 @@
 import { makeCardImport } from './credit-cards.mjs';
 import { makeInvoiceImport } from './invoices.mjs';
+import { makeLinePayImport } from './linepay.mjs';
 import { initHistory, renderHistory, clearHistory } from '../web/history.mjs';
 import { renderAssets } from '../web/assets.mjs';
 import { renderMatching, clearMatching } from '../web/matching.mjs';
@@ -412,6 +413,20 @@ export function initCloud({ getPayload }) {
       controls();
       try {
         const saved = await store.saveDecisions(rows);
+        await summary();
+        return saved;
+      } finally {
+        working = false;
+        controls();
+      }
+    },
+    saveLinePay: async ({ parsed, fileHash }) => {
+      if (working) throw Error('SYNC_BUSY');
+      if (!store.connected) throw Error('GOOGLE_LOGIN_REQUIRED');
+      working = true;
+      controls();
+      try {
+        const saved = await store.saveLinePay(await makeLinePayImport(parsed, { fileHash }));
         await summary();
         return saved;
       } finally {
