@@ -180,3 +180,63 @@ test('incomplete records from different files are preserved instead of guessed a
   assert.notEqual(a.rows[1][1], b.rows[1][1]);
   assert.equal(cardRowsToAppend(a.rows, b.rows).filter(r => r[0] === '明細').length, 1);
 });
+
+// 中信「未出帳單明細」: fabricated rows in the same layout as the bank's export.
+import { splitCardLocation } from '../pdf-parser/credit-cards.mjs';
+const UNBILLED = [
+  '未出帳單明細',
+  '資料時間：2026/10/29 15:48:09,單位：元',
+  '',
+  '交易序號,消費日,入帳日,摘要,卡號末四碼,新臺幣金額',
+  ',2026/10/23,2026/10/27,"本行扣繳　　　　　　　   ",,"-4,809"',
+  '1,2026/10/26,2026/10/28,連加＊虛構披薩店           Taipei       TW,9999,"1,254"',
+  '2,2026/10/19,2026/10/22,連支＊統一超商           Taipei       TW,9999,39',
+  '3,2026/10/19,2026/10/22,連支＊統一超商           Taipei       TW,9999,39',
+  '4,2026/10/12,2026/10/16,連加＊肯德基 KFC         Taipei       TW,9999,77'
+].join('\r\n');
+const unbilledBook = () => ({ sheets: [{ name: 'CSV', rows: parseCsvText(UNBILLED) }], encoding: 'Big5' });
+test('中信未出帳明細 is recognised and the padded location is split off the summary', () => {
+  const p = parseCardBook(unbilledBook(), { bank: 'ctbc' });
+  assert.equal(p.unbilled, true);
+  assert.equal(p.exportedAt, '2026/10/29 15:48:09');
+  assert.deepEqual(
+    p.transactions.map(t => [t.date, t.postingDate, t.summary, t.amountCents, t.kind]),
+    [
+      ['2026-10-23', '2026-10-27', '本行扣繳', -480900, '繳款'],
+      ['2026-10-26', '2026-10-28', '連加*虛構披薩店', 125400, '消費'],
+      ['2026-10-19', '2026-10-22', '連支*統一超商', 3900, '消費'],
+      ['2026-10-19', '2026-10-22', '連支*統一超商', 3900, '消費'],
+      ['2026-10-12', '2026-10-16', '連加*肯德基 KFC', 7700, '消費']
+    ]
+  );
+  assert.ok(p.transactions.every(t => !t.errors.length));
+  assert.throws(() => parseCardBook(unbilledBook(), { bank: 'kgi' }), /CARD_HEADER/);
+});
+test('location splitting keeps single spaces inside shop names', () => {
+  assert.deepEqual(splitCardLocation('連加*肯德基 KFC         Taipei       TW'), {
+    summary: '連加*肯德基 KFC',
+    location: 'Taipei TW'
+  });
+  assert.deepEqual(splitCardLocation('連支*麥當勞'), { summary: '連支*麥當勞', location: '' });
+  assert.deepEqual(splitCardLocation('OPENAI SAN FRANCISCO US'), {
+    summary: 'OPENAI SAN FRANCISCO US',
+    location: ''
+  });
+});
+test('the same transactions from the unbilled export and the later billed export de-duplicate', async () => {
+  const unbilled = parseCardBook(unbilledBook(), { bank: 'ctbc' });
+  const billed = parse([
+    ['2026/10/19', '2026/10/22', '連支＊統一超商', '', '', '', 'Taipei TW', '9999', '39'],
+    ['2026/10/19', '2026/10/22', '連支＊統一超商', '', '', '', 'Taipei TW', '9999', '39'],
+    ['2026/10/26', '2026/10/28', '連加＊虛構披薩店', '', '', '', 'Taipei TW', '9999', '1,254'],
+    ['2026/10/30', '2026/11/02', '連支＊統一超商', '', '', '', 'Taipei TW', '9999', '45']
+  ]);
+  const opts = { account: '中信信用卡', month: '2026-11' };
+  const first = await makeCardImport(unbilled, { ...opts, fileHash: 'unbilled', billKind: '未出帳' });
+  const second = await makeCardImport(billed, { ...opts, fileHash: 'billed', billKind: '已出帳' });
+  const fresh = cardRowsToAppend(first.rows, second.rows).filter(r => r[0] === '明細');
+  assert.deepEqual(
+    fresh.map(r => [r[8], r[10], r[11]]),
+    [['2026-10-30', '連支*統一超商', 4500]]
+  );
+});
