@@ -98,6 +98,16 @@ function hint(summary, cents) {
 // having its own column as in the billed export. Splitting it off keeps the same transaction's identity
 // identical in both exports, so the later billed statement de-duplicates against it.
 const CTBC_UNBILLED = ['交易序號', '消費日', '入帳日', '摘要', '卡號末四碼', '新臺幣金額'];
+const KGI_UNBILLED = [
+  '月份',
+  '消費名稱',
+  '消費日期',
+  '消費金額',
+  '卡號末四碼',
+  '消費地',
+  '入帳日期',
+  '外幣幣別和金額'
+];
 export function splitCardLocation(summary) {
   // The export pads the summary to a fixed width, so the location always follows two or more spaces.
   // Single spaces belong to the shop name ("肯德基 KFC") and are never split.
@@ -170,7 +180,8 @@ export function parseCardBook(book, { bank }) {
     if (unbilled.length > 1) throw Error('CARD_MULTIPLE');
     if (unbilled.length === 1) return parseCtbcUnbilled(book, unbilled[0]);
   }
-  const fields =
+  let unbilled = false;
+  let fields =
     bank === 'kgi'
       ? ['月份', '特店名稱', '消費日期', '消費金額', '卡號末四碼', '消費地', '入帳日期', '消費幣別']
       : [
@@ -184,10 +195,15 @@ export function parseCardBook(book, { bank }) {
           '末四碼',
           '新臺幣金額'
         ];
-  const matches = [];
-  for (const s of book.sheets)
-    for (let i = 0; i < Math.min(40, s.rows.length); i++)
-      if (fields.every((name, j) => norm(s.rows[i].cells[j]) === name)) matches.push({ s, i });
+  let matches = findHeader(book, fields);
+  if (!matches.length && bank === 'kgi') {
+    // 凱基「未出帳」Excel: same column order, but 「消費名稱」 and 「外幣幣別和金額」 headers.
+    matches = findHeader(book, KGI_UNBILLED);
+    if (matches.length) {
+      fields = KGI_UNBILLED;
+      unbilled = true;
+    }
+  }
   if (matches.length !== 1) throw Error(matches.length ? 'CARD_MULTIPLE' : 'CARD_HEADER');
   const { s, i } = matches[0],
     transactions = [],
@@ -238,7 +254,9 @@ export function parseCardBook(book, { bank }) {
       summary,
       amountCents,
       kind,
-      currency: currency === '-' ? '' : currency,
+      // The billed export leaves this blank for domestic and foreign charges alike; the unbilled column mixes
+      // currency and amount, so it is left out to keep the same transaction's identity equal in both exports.
+      currency: unbilled || currency === '-' ? '' : currency,
       foreignAmount: bank === 'ctbc' ? norm(get('foreign')) : '',
       line: r.line,
       errors
@@ -248,9 +266,14 @@ export function parseCardBook(book, { bank }) {
   const detailNetCents = transactions.every(t => Number.isSafeInteger(t.amountCents))
     ? transactions.reduce((s, t) => s + t.amountCents, 0)
     : null;
+  if (unbilled)
+    issues.unshift(
+      '未出帳明細：帳單尚未結帳，請填寫這些消費將出現在哪個月份的帳單。之後匯入正式帳單時，相同交易會自動略過。'
+    );
   return {
     bank: bank === 'kgi' ? '凱基銀行' : '中國信託',
     source: bank === 'kgi' ? 'excel' : 'csv',
+    unbilled,
     meta,
     transactions,
     issues: [...new Set(issues)],

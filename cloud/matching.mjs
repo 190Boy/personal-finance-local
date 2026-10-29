@@ -253,7 +253,8 @@ export function computeMatches({
           list.push({ record: r, score: 10 - Math.abs(diff) * 3 });
         continue;
       }
-      if (r.amountCents !== inv.totalCents || diff < -1 || diff > 3) continue;
+      // Online shops often issue the invoice days after the order is charged, so the card date may come first.
+      if (r.amountCents !== inv.totalCents || diff < -3 || diff > 3) continue;
       let score = 10 - Math.abs(diff) * 2;
       if (nameMatches(inv, r.summary)) score += 5;
       if (inv.habit?.recordHint && norm(r.summary).includes(norm(inv.habit.recordHint))) score += 5;
@@ -274,7 +275,7 @@ export function computeMatches({
       if (!free(r) || claims.has(r.key) || rejected.has(inv.id + '|' + r.key)) continue;
       const diff = days(inv.date, r.date),
         extra = r.amountCents - inv.totalCents;
-      if (extra <= 0 || extra > SMALL_EXTRA_CENTS || diff < -1 || diff > 3) continue;
+      if (extra <= 0 || extra > SMALL_EXTRA_CENTS || diff < -3 || diff > 3) continue;
       let score = 4 - Math.abs(diff) * 2 - extra / 100;
       if (nameMatches(inv, r.summary)) score += 5;
       if (inv.habit?.recordHint && norm(r.summary).includes(norm(inv.habit.recordHint))) score += 5;

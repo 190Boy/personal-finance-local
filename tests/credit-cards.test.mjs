@@ -240,3 +240,82 @@ test('the same transactions from the unbilled export and the later billed export
     [['2026-10-30', '連支*統一超商', 4500]]
   );
 });
+
+// 凱基「未出帳」Excel: fabricated rows in the bank's layout (full-width text, NTD-prefixed amounts).
+const kgiRows = (header, rows) => ({
+  sheets: [
+    {
+      name: 'Sheet1',
+      rows: [['總未出帳'], ['NTD 1,000'], ['信用卡額度', 'NTD 80,000'], header, ...rows].map((cells, i) => ({
+        cells,
+        raw: cells,
+        line: i + 1
+      }))
+    }
+  ]
+});
+const KGI_BILLED = [
+  '月份',
+  '特店名稱',
+  '消費日期',
+  '消費金額',
+  '卡號末四碼',
+  '消費地',
+  '入帳日期',
+  '消費幣別'
+];
+const KGI_UNBILLED_HEADER = [
+  '月份',
+  '消費名稱',
+  '消費日期',
+  '消費金額',
+  '卡號末四碼',
+  '消費地',
+  '入帳日期',
+  '外幣幣別和金額'
+];
+test('凱基未出帳 Excel is recognised and normalises to the billed summaries', () => {
+  const p = parseCardBook(
+    kgiRows(KGI_UNBILLED_HEADER, [
+      ['2026年10月', '富邦ｍｏｍｏ－ＥＣ', '2026/10/21', 'NTD 149', '9999', '', '2026/10/27', ''],
+      ['2026年10月', '優步－麥當勞\u3000新店北新', '2026/10/25', 'NTD 798', '9999', '', '2026/10/29', ''],
+      ['2026年10月', '虛構海外訂閱', '2026/10/25', 'NTD 630', '9999', '', '2026/10/28', 'USD 20.00']
+    ]),
+    { bank: 'kgi' }
+  );
+  assert.equal(p.unbilled, true);
+  assert.equal(p.meta.month, '');
+  assert.deepEqual(
+    p.transactions.map(t => [t.summary, t.amountCents, t.currency, t.foreignAmount]),
+    [
+      ['富邦momo-EC', 14900, '', ''],
+      ['優步-麥當勞 新店北新', 79800, '', ''],
+      ['虛構海外訂閱', 63000, '', '']
+    ]
+  );
+});
+test('凱基 unbilled then billed: the overlap is skipped', async () => {
+  const row = (name, date, amount, post) => ['2026年10月', name, date, amount, '9999', '', post, ''];
+  const unbilled = parseCardBook(
+    kgiRows(KGI_UNBILLED_HEADER, [row('富邦ｍｏｍｏ－ＥＣ', '2026/10/21', 'NTD 149', '2026/10/27')]),
+    {
+      bank: 'kgi'
+    }
+  );
+  const billed = parseCardBook(
+    kgiRows(KGI_BILLED, [
+      row('富邦momo-EC', '2026/10/21', '149', '2026/10/27'),
+      row('虛構新消費', '2026/11/02', '80', '2026/11/04')
+    ]),
+    { bank: 'kgi' }
+  );
+  const opts = { account: '凱基信用卡', month: '2026-11' };
+  const a = await makeCardImport(unbilled, { ...opts, fileHash: 'u' }),
+    b = await makeCardImport(billed, { ...opts, fileHash: 'b' });
+  assert.deepEqual(
+    cardRowsToAppend(a.rows, b.rows)
+      .filter(r => r[0] === '明細')
+      .map(r => r[10]),
+    ['虛構新消費']
+  );
+});
