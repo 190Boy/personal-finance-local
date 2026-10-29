@@ -2,7 +2,7 @@
 
 在手機或電腦瀏覽器裡讀取銀行、券商、信用卡下載的對帳檔，整理成交易明細與資產總覽，並存進使用者自己 Google Drive 裡的一份試算表。純前端 PWA，部署在 GitHub Pages，沒有後端伺服器。
 
-目前版本：v0.9.0。各版本改了什麼見 [CHANGELOG.md](CHANGELOG.md)。
+目前版本：v0.9.1。各版本改了什麼見 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 功能
 

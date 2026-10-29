@@ -3,6 +3,7 @@ import { makeInvoiceImport } from './invoices.mjs';
 import { initHistory, renderHistory, clearHistory } from '../web/history.mjs';
 import { renderAssets } from '../web/assets.mjs';
 import { renderMatching, clearMatching } from '../web/matching.mjs';
+import { setCardAccounts } from '../web/cards.mjs';
 import { makeStockImport } from './stocks.mjs';
 import { rememberedAccount, rememberAccount } from './login-preferences.mjs';
 import { initAccounts } from './accounts.mjs';
@@ -141,6 +142,7 @@ function showAccount() {
 }
 function clearSummary() {
   accountChoices?.clear();
+  setCardAccounts({}, false);
   renderAssets(null);
   clearHistory();
   clearMatching();
@@ -155,6 +157,7 @@ async function summary() {
   renderHistory(result.history);
   renderMatching(result.matching);
   accountChoices?.update(result.accounts || {});
+  setCardAccounts(result.cardAccounts || {}, true);
   $('bankDeposit').textContent = result.balances.length
     ? (result.pending.length ? '部分合計 NT$ ' : 'NT$ ') +
       (result.totalCents / 100).toLocaleString('zh-TW', {
