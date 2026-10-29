@@ -1,4 +1,5 @@
-import { manualEntry, manualRow, MANUAL_CATEGORIES } from '../cloud/manual.mjs';
+import { manualEntry, manualRow } from '../cloud/manual.mjs';
+import { CATEGORY_TREE, iconOf, normalizeCategory, mainOf } from '../cloud/categories.mjs';
 import { decisionRow, PAYMENT_METHODS } from '../cloud/matching.mjs';
 import { hash } from '../cloud/records.mjs';
 const $ = id => document.getElementById(id);
@@ -8,6 +9,8 @@ const messages = {
   MANUAL_TIME: '時間格式不正確，可以留空。',
   MANUAL_AMOUNT: '請填寫大於 0 的金額，最多到小數點後兩位。',
   MANUAL_METHOD: '請選擇付款方式。',
+  MANUAL_EXPRESSION: '金額算式看不懂，只支援數字與 + −。',
+  MANUAL_CATEGORY: '請選一個分類。',
   MANUAL_AMOUNT_SHEET: '「手動記帳」工作表的金額無法辨識。',
   GOOGLE_LOGIN_REQUIRED: '請先連接 Google，再回來記帳。',
   SYNC_BUSY: '其他同步正在進行，請稍後重試。',
@@ -31,16 +34,97 @@ let cloud = null,
   busy = false,
   shown = 30;
 
+// Amount with a small calculator: digits, + and −; 「=」 or saving evaluates the expression.
+export function evaluateAmount(text) {
+  const t = String(text).replace(/\s+/g, '').replace(/[−－]/g, '-').replace(/[＋]/g, '+');
+  if (!t) return '';
+  if (!/^\d+(\.\d{1,2})?([+-]\d+(\.\d{1,2})?)*$/.test(t)) throw Error('MANUAL_EXPRESSION');
+  let cents = 0;
+  for (const part of t.match(/[+-]?\d+(\.\d{1,2})?/g)) {
+    const sign = part.startsWith('-') ? -1 : 1,
+      [whole, frac = ''] = part.replace(/^[+-]/, '').split('.');
+    cents += sign * (Number(whole) * 100 + Number(frac.padEnd(2, '0')));
+  }
+  return (cents / 100)
+    .toFixed(2)
+    .replace(/\.00$/, '')
+    .replace(/(\.\d)0$/, '$1');
+}
+function setType(type) {
+  $('manualType').value = type;
+  for (const b of document.querySelectorAll('.type-tab'))
+    b.setAttribute('aria-selected', String(b.dataset.type === type));
+  drawCategories();
+}
+function setCategory(category) {
+  $('manualCategory').value = category || '';
+  $('manualCategoryName').textContent = category ? iconOf(category) + ' ' + category : '尚未選擇';
+  drawCategories();
+}
+function drawCategories() {
+  const type = $('manualType').value,
+    chosen = $('manualCategory').value,
+    groups = type === '收入' ? CATEGORY_TREE.收入 : [...CATEGORY_TREE.支出, ...CATEGORY_TREE.轉帳];
+  const grid = $('manualCategoryGrid'),
+    subs = $('manualSubGrid');
+  grid.replaceChildren();
+  subs.replaceChildren();
+  for (const c of groups) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'category-tile' + (mainOf(chosen) === c.name ? ' on' : '');
+    b.append(
+      Object.assign(document.createElement('span'), { className: 'icon', textContent: c.icon }),
+      c.name
+    );
+    b.addEventListener('click', () => setCategory(c.name));
+    grid.append(b);
+  }
+  const main = groups.find(c => c.name === mainOf(chosen));
+  if (main)
+    for (const sub of main.subs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sub-chip' + (chosen === main.name + '／' + sub ? ' on' : '');
+      b.textContent = sub;
+      b.addEventListener('click', () =>
+        setCategory(chosen === main.name + '／' + sub ? main.name : main.name + '／' + sub)
+      );
+      subs.append(b);
+    }
+}
+function keypad() {
+  const box = $('manualKeypad');
+  for (const key of ['7', '8', '9', '⌫', '4', '5', '6', '+', '1', '2', '3', '−', '00', '0', '.', '=']) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = key;
+    b.className = 'key' + (/[⌫+−=]/.test(key) ? ' op' : '');
+    b.addEventListener('click', () => {
+      const input = $('manualAmount');
+      try {
+        if (key === '⌫') input.value = input.value.slice(0, -1);
+        else if (key === '=') input.value = evaluateAmount(input.value);
+        else input.value += key === '−' ? '-' : key;
+        $('manualStatus').textContent = '';
+      } catch (error) {
+        $('manualStatus').textContent = messages[error.message];
+      }
+    });
+    box.append(b);
+  }
+}
+
 function fill(values = {}) {
   editing = values.id ? values : null;
   gapId = values.gapId || '';
-  $('manualType').value = values.type || '支出';
+  setType(values.type || '支出');
   $('manualDate').value = values.date || today();
   $('manualTime').value = values.time || '';
   $('manualAmount').value = values.amountCents ? String(values.amountCents / 100) : values.amount || '';
   $('manualMethod').value = values.method || '現金';
   $('manualParty').value = values.party || '';
-  $('manualCategory').value = values.category || '';
+  setCategory(normalizeCategory(values.category, values.type || '支出'));
   $('manualNote').value = values.note || '';
   $('manualSave').textContent = editing ? '儲存修改' : '儲存';
   $('manualCancel').hidden = !editing && !gapId;
@@ -99,7 +183,7 @@ function draw() {
       actions = document.createElement('div');
     card.className = 'invoice-card';
     top.className = 'top';
-    h.textContent = e.party || e.category || e.type;
+    h.textContent = iconOf(normalizeCategory(e.category, e.type)) + ' ' + (e.party || e.category || e.type);
     amount.className = 'amount';
     amount.textContent = (e.type === '收入' ? '+' : '') + money(e.amountCents) + ' 元';
     meta.className = 'meta';
@@ -156,13 +240,20 @@ export function renderManual(list) {
 export function initManual(api) {
   cloud = api;
   for (const m of PAYMENT_METHODS) $('manualMethod').append(new Option(m, m));
-  for (const c of MANUAL_CATEGORIES) $('manualCategories').append(new Option(c, c));
+  keypad();
+  for (const b of document.querySelectorAll('.type-tab'))
+    b.addEventListener('click', () => {
+      setType(b.dataset.type);
+      setCategory('');
+    });
   fill();
   $('manualForm').addEventListener('submit', async ev => {
     ev.preventDefault();
     if (busy) return;
     let entry;
     try {
+      $('manualAmount').value = evaluateAmount($('manualAmount').value);
+      if (!$('manualCategory').value) throw Error('MANUAL_CATEGORY');
       entry = manualEntry({
         id: editing?.id || crypto.randomUUID(),
         type: $('manualType').value,

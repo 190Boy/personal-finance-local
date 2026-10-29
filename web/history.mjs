@@ -1,7 +1,16 @@
 import { filterHistory } from '../cloud/history.mjs';
+import { CATEGORY_TREE, MAIN_CATEGORIES, iconOf, isInternal, monthTotals } from '../cloud/categories.mjs';
+import { decisionRow } from '../cloud/matching.mjs';
+import { hash } from '../cloud/records.mjs';
 const $ = id => document.getElementById(id);
 let data = null,
-  limit = 100;
+  limit = 100,
+  cloud = null,
+  busy = false;
+const yuan = c => (c / 100).toLocaleString('zh-TW', { maximumFractionDigits: 2 });
+export function setHistoryCloud(api) {
+  cloud = api;
+}
 const shownNumber = v =>
   v === '' || v == null
     ? '—'
@@ -18,6 +27,9 @@ export function clearHistory() {
   $('historyFrom').value = '';
   $('historyTo').value = '';
   $('historyKind').value = '';
+  $('historyMonth').replaceChildren(new Option('全部月份', ''));
+  $('historyCategory').value = '';
+  $('historyTotals').hidden = true;
   $('historyCount').textContent = '尚未載入歷史交易。';
   $('historyEmpty').hidden = false;
   $('historyEmpty').textContent = '請點上方按鈕連接 Google 並載入。';
@@ -35,11 +47,26 @@ export function renderHistory(result) {
   $('historyAccount').replaceChildren(new Option('全部帳戶', ''));
   for (const [key, label] of accounts) $('historyAccount').append(new Option(label, key));
   if (accounts.has(chosen)) $('historyAccount').value = chosen;
+  // Months newest first; open on the newest month the first time data arrives.
+  const month = $('historyMonth').value,
+    months = [
+      ...new Set(result.rows.map(r => String(r.date).slice(0, 7)).filter(m => /^\d{4}-\d{2}$/.test(m)))
+    ]
+      .sort()
+      .reverse();
+  const first = $('historyMonth').options.length <= 1;
+  $('historyMonth').replaceChildren(
+    new Option('全部月份', ''),
+    ...months.map(m => new Option(m.replace('-', ' 年 ') + ' 月', m))
+  );
+  $('historyMonth').value = months.includes(month) ? month : first && months.length ? months[0] : '';
   draw();
 }
 function draw() {
   if (!data) return;
   const rows = filterHistory(data.rows, {
+    month: $('historyMonth').value,
+    category: $('historyCategory').value,
     kind: $('historyKind').value,
     account: $('historyAccount').value,
     query: $('historyQuery').value,
@@ -59,6 +86,25 @@ function draw() {
         ' 筆。'
       : '起始日期不可晚於結束日期。') +
     (data.duplicates ? ' 已合併顯示 ' + data.duplicates + ' 個重複列。' : '');
+  const totals = monthTotals(rows);
+  $('historyTotals').hidden = false;
+  $('historyTotals').replaceChildren(
+    ...[
+      ['支出', totals.expenseCents, 'out'],
+      ['收入', totals.incomeCents, 'in'],
+      ['結餘', totals.incomeCents - totals.expenseCents, 'net']
+    ].map(([label, cents, cls]) => {
+      const box = document.createElement('div');
+      box.className = 'stat ' + cls;
+      box.append(Object.assign(document.createElement('small'), { textContent: label }));
+      box.append(Object.assign(document.createElement('strong'), { textContent: yuan(cents) }));
+      return box;
+    }),
+    Object.assign(document.createElement('p'), {
+      className: 'muted',
+      textContent: '合計不含內部轉帳（繳卡費、儲值、提款、買股票）與股票股數。'
+    })
+  );
   $('historyRows').replaceChildren();
   $('historyCards').replaceChildren();
   $('historyEmpty').hidden = rows.length > 0;
@@ -70,7 +116,7 @@ function draw() {
       stock = r.kind === '股票股數',
       credit = r.kind === '信用卡';
     const values = [
-      r.kind,
+      r.kind + (r.category ? '／' + r.category : ''),
       r.source,
       r.account,
       r.date || '日期待核對',
@@ -98,6 +144,8 @@ function draw() {
     meta.className = 'muted';
     meta.textContent = r.date + ' ' + r.time + ' · ' + r.source + '／' + r.account + ' · ' + r.kind;
     card.append(meta, title);
+    if (r.category) card.append(categoryChip(r));
+    if (isInternal(r.category)) card.classList.add('internal');
     const dl = document.createElement('dl');
     for (const [label, value] of credit
       ? [
@@ -132,7 +180,21 @@ function draw() {
   $('historyMore').hidden = rows.length <= limit;
 }
 export function initHistory() {
-  for (const id of ['historyKind', 'historyAccount', 'historyQuery', 'historyFrom', 'historyTo'])
+  for (const group of Object.entries(CATEGORY_TREE)) {
+    const og = document.createElement('optgroup');
+    og.label = group[0];
+    for (const c of group[1]) og.append(new Option(c.icon + ' ' + c.name, c.name));
+    $('historyCategory').append(og);
+  }
+  for (const id of [
+    'historyMonth',
+    'historyCategory',
+    'historyKind',
+    'historyAccount',
+    'historyQuery',
+    'historyFrom',
+    'historyTo'
+  ])
     $(id).addEventListener('input', () => {
       limit = 100;
       draw();
@@ -142,7 +204,14 @@ export function initHistory() {
     draw();
   });
   $('historyReset').addEventListener('click', () => {
-    for (const id of ['historyKind', 'historyAccount', 'historyQuery', 'historyFrom', 'historyTo'])
+    for (const id of [
+      'historyCategory',
+      'historyKind',
+      'historyAccount',
+      'historyQuery',
+      'historyFrom',
+      'historyTo'
+    ])
       $(id).value = '';
     limit = 100;
     draw();
@@ -187,4 +256,61 @@ function matchBlock(match) {
           ' 元（沒開進發票的小額，例如塑膠袋）'
         : '');
   return [list, note];
+}
+
+// The category shows as a chip; tapping it offers the whole tree. Hand-entered records are changed on their
+// own page, so only imported records get the picker.
+function categoryChip(r) {
+  const wrap = document.createElement('div');
+  wrap.className = 'category-line';
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'category-chip' + (r.categorySource === '自動' ? ' auto' : '');
+  chip.textContent = iconOf(r.category) + ' ' + r.category + (r.categorySource === '自動' ? '（自動）' : '');
+  wrap.append(chip);
+  if (r.kind === '手動記帳' || !r.recordKey || !cloud) {
+    chip.disabled = true;
+    return wrap;
+  }
+  chip.addEventListener('click', () => {
+    if (wrap.querySelector('select')) return;
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', '改分類');
+    for (const [group, list] of Object.entries(CATEGORY_TREE)) {
+      const og = document.createElement('optgroup');
+      og.label = group;
+      for (const c of list)
+        for (const sub of [null, ...c.subs])
+          og.append(
+            new Option((sub ? '　' : c.icon + ' ') + (sub || c.name), sub ? c.name + '／' + sub : c.name)
+          );
+      select.append(og);
+    }
+    if (r.categorySource !== '自動') select.append(new Option('↩ 恢復自動分類', '__auto'));
+    select.value = [...select.options].some(o => o.value === r.category) ? r.category : MAIN_CATEGORIES[0];
+    select.addEventListener('change', async () => {
+      if (busy) return;
+      busy = true;
+      select.disabled = true;
+      try {
+        const auto = select.value === '__auto';
+        await cloud.saveDecisions([
+          await decisionRow(hash, {
+            type: '分類',
+            target: 'cat:' + r.recordKey,
+            action: auto ? '撤銷' : '分類',
+            method: auto ? '' : select.value
+          })
+        ]);
+      } catch {
+        $('historyNotice').textContent = '分類尚未儲存，請確認已連接 Google 後重試。';
+        select.disabled = false;
+      } finally {
+        busy = false;
+      }
+    });
+    wrap.append(select);
+    select.focus();
+  });
+  return wrap;
 }

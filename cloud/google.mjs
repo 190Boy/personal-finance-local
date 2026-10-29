@@ -17,6 +17,7 @@ import {
   linePayEvents,
   walletGaps
 } from './linepay.mjs';
+import { categorize, categoryOverrides, recordKeyOf } from './categories.mjs';
 import { MANUAL_HEADERS, manualTable, manualSheetRows, manualEntries, manualHistoryRow } from './manual.mjs';
 import { mergeStockTables } from './stock-layout.mjs';
 import { ledgerPlan, migrationId } from './ledger.mjs';
@@ -310,7 +311,14 @@ export class GoogleStore {
       credits.pending.push({ bank: '信用卡', account: '', reason: '載入失敗' });
     }
     let matching = null,
-      manual = [];
+      manual = [],
+      decisionRows = [];
+    try {
+      decisionRows = await this.read('配對紀錄');
+    } catch (e) {
+      if (e.message === 'GOOGLE_LOGIN_REQUIRED') throw e;
+      warnings.push('配對紀錄讀取未完成：' + readReason(e));
+    }
     try {
       manual = manualEntries(manualTable(await this.read('手動記帳')));
     } catch (e) {
@@ -325,7 +333,7 @@ export class GoogleStore {
           cardRows: cardRowsForMatching,
           bankRows: rows,
           habits: readHabits(await this.read('付款習慣')),
-          decisionRows: await this.read('配對紀錄'),
+          decisionRows,
           linePayEvents: events,
           wallet: events.length ? walletGaps(events, rows) : null,
           manualEntries: manual
@@ -385,6 +393,7 @@ export class GoogleStore {
             fee: null,
             balance: null,
             review: '依錢包餘額推算，沒有通知',
+            gapLabel: g.label,
             conflict: false,
             ordinal: 0,
             financial: g.id
@@ -397,6 +406,12 @@ export class GoogleStore {
       history.rows.sort(
         (a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.ordinal - a.ordinal
       );
+    }
+    for (const h of history.rows) h.recordKey = recordKeyOf(h);
+    try {
+      categorize(history.rows, categoryOverrides(decisionRows));
+    } catch (e) {
+      warnings.push('分類未完成：' + readReason(e));
     }
     return {
       ...bankSummary(rows),
