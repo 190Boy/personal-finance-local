@@ -170,6 +170,25 @@ export function walletRecords(events) {
     }));
 }
 
+// Hand-entered spending can pair with an invoice too, e.g. a cash purchase the user recorded with its invoice.
+export function manualRecords(entries) {
+  return (
+    entries
+      // Transfers to people never have an invoice; keeping them out avoids pairing one by coincidence.
+      .filter(e => e.type === '支出' && e.amountCents > 0 && !e.category.includes('轉帳'))
+      .map(e => ({
+        key: 'manual:' + e.id,
+        kind: '手動記帳',
+        source: '手動記帳',
+        account: e.method,
+        date: e.date,
+        time: e.time,
+        summary: e.party || e.category || '手動記帳',
+        amountCents: e.amountCents
+      }))
+  );
+}
+
 // Exclusive decisions: the latest per target wins; 「撤銷」 clears it. Rejections accumulate.
 export function readDecisions(values) {
   if (values.length && JSON.stringify(values[0]) !== JSON.stringify(DECISION_HEADERS))
@@ -201,6 +220,8 @@ export function coverage(records) {
   const sources = new Map();
   for (const r of records) {
     if (r.kind === '銀行存款' && !r.summary.includes(TOPUP_HINT)) continue;
+    // Hand-entered spending has no statement period.
+    if (r.kind === '手動記帳') continue;
     const name = r.source + '／' + r.account,
       s = sources.get(name) || { name, start: r.date, end: r.date };
     if (r.date < s.start) s.start = r.date;
@@ -227,11 +248,16 @@ export function computeMatches({
   habits = DEFAULT_HABITS.map(toHabit),
   decisionRows = [],
   linePayEvents = [],
-  wallet = null
+  wallet = null,
+  manualEntries = []
 }) {
   const topupKeys = wallet?.topupKeys || new Set();
   const all = latestInvoices(invoiceRows),
-    records = [...spendingRecords(cardRows, bankRows), ...walletRecords(linePayEvents)],
+    records = [
+      ...spendingRecords(cardRows, bankRows),
+      ...walletRecords(linePayEvents),
+      ...manualRecords(manualEntries)
+    ],
     byKey = new Map(records.map(r => [r.key, r])),
     { exclusive, rejected } = readDecisions(decisionRows),
     cover = coverage(records),

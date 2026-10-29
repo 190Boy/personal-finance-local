@@ -2,6 +2,7 @@ import { initCards } from './cards.mjs';
 import { initInvoices } from './invoices.mjs';
 import { initMatching } from './matching.mjs';
 import { initLinePay } from './linepay.mjs';
+import { initManual } from './manual.mjs';
 import { initStocks } from './stocks.mjs';
 import { initCloud } from '../cloud/ui.mjs';
 import { inspectTable, parseEsunTable, TABLE_FIELDS } from '../pdf-parser/tabular.mjs';
@@ -92,6 +93,7 @@ const routes = [
   'invoices',
   'linepay',
   'matching',
+  'manual',
   'settings'
 ];
 function updateRoute(focus = false) {
@@ -106,7 +108,7 @@ function updateRoute(focus = false) {
       link.dataset.nav ===
       (['stocks', 'bank-import', 'cards', 'invoices', 'linepay'].includes(route)
         ? 'import'
-        : route === 'matching'
+        : ['matching', 'manual'].includes(route)
           ? 'transactions'
           : route)
     )
@@ -691,3 +693,4 @@ initCards(cloud);
 initInvoices(cloud);
 initMatching(cloud);
 initLinePay(cloud);
+initManual(cloud);

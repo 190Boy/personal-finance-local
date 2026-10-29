@@ -133,6 +133,28 @@ function walletSection(w) {
           label !== GAP_LABELS[g.direction][0]
         )
       );
+    // Recording the detail (who received the transfer) explains the gap at the same time.
+    actions.append(
+      button(
+        '補記明細…',
+        () => {
+          window.dispatchEvent(
+            new CustomEvent('finance-manual-prefill', {
+              detail: {
+                gapId: g.id,
+                type: g.direction === 'out' ? '支出' : '收入',
+                date: g.to.date,
+                amountCents: g.amountCents,
+                method: 'LINE Pay 錢包',
+                category: g.direction === 'out' ? '轉帳給別人' : '收到轉帳'
+              }
+            })
+          );
+          location.hash = '#manual';
+        },
+        true
+      )
+    );
     card.append(actions);
     s.append(card);
   }
