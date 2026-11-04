@@ -1,13 +1,58 @@
+import { monthReport, budgetStatus, TOTAL } from '../cloud/budget.mjs';
+import { localToday } from '../cloud/recurring.mjs';
 const $ = id => document.getElementById(id);
+const yuan = c => Math.round(c / 100).toLocaleString('zh-TW');
+// The same balances as 帳戶與餘額, grouped by kind.
+function accountGroups(summary) {
+  const list = summary?.accountBalances?.accounts;
+  if (!list) return null;
+  const sum = type => list.filter(a => a.type === type).reduce((s, a) => s + a.cents, 0);
+  return {
+    bank: sum('銀行'),
+    cash: sum('現金'),
+    wallet: sum('電子支付'),
+    other: sum('其他'),
+    banks: list.filter(a => a.type === '銀行'),
+    partial: list.some(a => a.partial && a.type !== '現金')
+  };
+}
 const money = c => (c / 100).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export function assetParts(summary) {
   if (!summary) return [];
+  const g = accountGroups(summary);
+  // Colors follow the kind of asset, in a fixed order, whatever is present.
+  if (g)
+    return [
+      { name: '銀行存款', cents: g.bank, color: '#2a78d6' },
+      { name: '現金', cents: g.cash, color: '#eb6834' },
+      { name: '股票市值', cents: summary.stocks?.totalCents || 0, color: '#1baf7a' },
+      { name: 'LINE Pay 錢包', cents: g.wallet, color: '#eda100' },
+      { name: '其他帳戶', cents: g.other, color: '#e87ba4' }
+    ].filter(p => Number.isSafeInteger(p.cents) && p.cents > 0);
   return [
     { name: '銀行存款', cents: summary.totalCents, color: '#1763aa' },
     { name: '股票市值', cents: summary.stocks?.totalCents || 0, color: '#16a487' }
   ].filter(p => Number.isSafeInteger(p.cents) && p.cents > 0);
 }
 export function netAssets(summary) {
+  const g = accountGroups(summary);
+  if (g) {
+    const stocks = summary.stocks?.totalCents || 0,
+      cards = summary.credits?.totalCents || 0,
+      other = g.cash + g.wallet + g.other,
+      cents = g.bank + other + stocks - cards;
+    if (![g.bank, other, stocks, cards, cents].every(Number.isSafeInteger)) return null;
+    return {
+      bank: g.bank,
+      other,
+      stocks,
+      cards,
+      cents,
+      partial:
+        g.partial ||
+        !!(summary.pending?.length || summary.stocks?.pending?.length || summary.credits?.pending?.length)
+    };
+  }
   if (
     !summary ||
     !(summary.balances?.length || summary.stocks?.accounts?.length || summary.credits?.accounts?.length)
@@ -30,10 +75,68 @@ export function netAssets(summary) {
       !!(summary.pending?.length || summary.stocks?.pending?.length || summary.credits?.pending?.length)
   };
 }
+function renderMonth(summary) {
+  const box = $('homeMonth');
+  if (!box) return;
+  const rows = summary?.history?.rows;
+  box.hidden = !rows;
+  if (!rows) return;
+  const month = localToday().slice(0, 7),
+    report = monthReport(rows, month);
+  $('homeMonthTitle').textContent = +month.slice(5) + ' 月收支';
+  $('homeExpense').textContent = yuan(report.expenseCents);
+  $('homeIncome').textContent = yuan(report.incomeCents);
+  $('homeNet').textContent = yuan(report.incomeCents - report.expenseCents);
+  const total = budgetStatus(summary.budgets || new Map(), report).find(b => b.name === TOTAL);
+  const top = report.byCategory[0];
+  $('homeMonthDetail').textContent =
+    [
+      total
+        ? total.leftCents >= 0
+          ? '總預算還剩 ' + yuan(total.leftCents) + ' 元（已用 ' + Math.round(total.ratio * 100) + '%）'
+          : '⚠ 已超出總預算 ' + yuan(-total.leftCents) + ' 元'
+        : '還沒有設定預算',
+      top ? '花最多的是' + top.name + ' ' + yuan(top.cents) + ' 元' : '這個月還沒有支出紀錄'
+    ].join('；') + '。不含股票與自己帳戶之間的轉帳。';
+  $('homeMonthDetail').className = total && total.leftCents < 0 ? 'bad' : 'muted';
+}
+function renderBank(summary) {
+  const g = accountGroups(summary);
+  if (!summary) {
+    $('bankDeposit').textContent = '尚未同步';
+    $('bankDepositDetail').textContent = '連接 Google 後載入各帳戶最後餘額。';
+    return;
+  }
+  if (g?.banks.length) {
+    $('bankDeposit').textContent = (summary.pending?.length ? '部分合計 NT$ ' : 'NT$ ') + money(g.bank);
+    $('bankDepositDetail').textContent =
+      g.banks.map(a => a.name + '：' + yuan(a.cents) + '（' + a.note + '）').join('；') +
+      (summary.pending?.length
+        ? '；' + summary.pending.length + ' 個帳戶餘額或交易先後待確認，未列入合計。'
+        : '') +
+      ' 以匯入明細最後餘額為準，再加減之後的手動記帳，不是銀行即時餘額。';
+    return;
+  }
+  $('bankDeposit').textContent = summary.balances?.length
+    ? (summary.pending?.length ? '部分合計 NT$ ' : 'NT$ ') + money(summary.totalCents)
+    : '尚無可核對餘額';
+  $('bankDepositDetail').textContent =
+    (summary.balances?.length
+      ? summary.balances
+          .map(b => b.bank + '／' + b.account + '：' + yuan(b.cents) + '（' + b.date + '）')
+          .join('；')
+      : '尚無已儲存的銀行明細。') +
+    (summary.pending?.length
+      ? '；' + summary.pending.length + ' 個帳戶餘額或交易先後待確認，未列入合計。'
+      : '') +
+    ' 此為匯入明細最後餘額，非銀行即時餘額。';
+}
 export function renderAssets(summary) {
   const stocks = summary?.stocks,
     credits = summary?.credits;
   const net = netAssets(summary);
+  renderMonth(summary);
+  renderBank(summary);
   $('creditCardDebt').textContent = credits?.accounts.length
     ? (credits.pending.length ? '部分合計 NT$ ' : 'NT$ ') + money(credits.totalCents)
     : summary
@@ -69,6 +172,7 @@ export function renderAssets(summary) {
   $('netAssetDetail').textContent = net
     ? '銀行存款 NT$ ' +
       money(net.bank) +
+      (net.other != null ? ' ＋ 現金與錢包等 NT$ ' + money(net.other) : '') +
       ' ＋ 股票市值 NT$ ' +
       money(net.stocks) +
       ' － 信用卡最新月份消費 NT$ ' +
@@ -76,7 +180,7 @@ export function renderAssets(summary) {
       '。依已載入資料估算，非完整或即時淨資產；各來源日期見下方。' +
       (net.partial ? '有來源缺漏、未載入或待核對，僅顯示部分範圍。' : '') +
       ' 消費合計未扣除已繳款或退款，也未納入其他費用、未來分期及其他負債。'
-    : '連接 Google 後，依銀行存款、股票市值與最新月份信用卡消費估算。';
+    : '連接 Google 後，依銀行存款、現金與錢包、股票市值與最新月份信用卡消費估算。';
   $('stockAssets').textContent = stocks?.accounts.length ? 'NT$ ' + money(stocks.totalCents) : '尚未同步';
   $('stockAssetDetail').textContent = stocks
     ? stocks.accounts
@@ -104,7 +208,7 @@ export function renderAssets(summary) {
   $('assetChartNotice').textContent = total
     ? '已載入正值資產合計 NT$ ' +
       money(total) +
-      '。僅包含可核對的銀行存款與股票報表市值，非完整淨資產；負值、待核對帳戶及未載入來源未列入。'
+      '。包含帳戶與餘額頁的銀行、現金、錢包與股票報表市值，非完整淨資產；負值、待核對帳戶及未載入來源未列入。'
     : '尚無可顯示的正值資產；請連接 Google 並匯入資料。';
   if (!total) return;
   const ns = 'http://www.w3.org/2000/svg',
