@@ -6,7 +6,7 @@ import { renderAssets } from '../web/assets.mjs';
 import { renderMatching, clearMatching } from '../web/matching.mjs';
 import { setCardAccounts } from '../web/cards.mjs';
 import { renderManual } from '../web/manual.mjs';
-import { renderAccounts } from '../web/accounts-view.mjs';
+import { renderAccounts, askCashIfNeeded } from '../web/accounts-view.mjs';
 import { makeStockImport } from './stocks.mjs';
 import { rememberedAccount, rememberAccount } from './login-preferences.mjs';
 import { initAccounts } from './accounts.mjs';
@@ -163,6 +163,7 @@ async function summary() {
   renderMatching(result.matching);
   renderManual(result.manual || [], result.balances?.names);
   renderAccounts(result.balances);
+  askCashIfNeeded(result.balances);
   accountChoices?.update(result.accounts || {});
   setCardAccounts(result.cardAccounts || {}, true);
   $('bankDeposit').textContent = result.balances.length
