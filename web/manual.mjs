@@ -144,6 +144,24 @@ function keypad() {
     });
     box.append(b);
   }
+  const toggle = $('manualKeypadToggle');
+  if (!toggle) return;
+  const setOpen = open => {
+    box.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? '收合計算機' : '展開計算機');
+    // While the keypad is open, keep the phone's own keyboard from covering it.
+    $('manualAmount').setAttribute('inputmode', open ? 'none' : 'decimal');
+    try {
+      localStorage.setItem('manualKeypadOpen', open ? '1' : '0');
+    } catch {}
+  };
+  let saved = false;
+  try {
+    saved = localStorage.getItem('manualKeypadOpen') === '1';
+  } catch {}
+  setOpen(saved);
+  toggle.addEventListener('click', () => setOpen(box.hidden));
 }
 
 function fill(values = {}) {
