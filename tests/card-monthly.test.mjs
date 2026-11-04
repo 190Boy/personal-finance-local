@@ -141,3 +141,45 @@ test('net estimate uses bank plus stocks minus monthly consumption, including ne
   assert.equal(netAssets(null), null);
   assert.equal(netAssets({}), null);
 });
+
+test('with account balances the home numbers match 帳戶與餘額: cash and wallet count, banks include later hand entries', async () => {
+  const { assetParts } = await import('../web/assets.mjs');
+  const s = {
+    totalCents: 100000,
+    balances: [{}],
+    pending: [],
+    stocks: { totalCents: 50000, accounts: [{}], pending: [] },
+    credits: { totalCents: 20000, accounts: [{}], pending: [] },
+    accountBalances: {
+      accounts: [
+        { name: '玉山銀行／帳戶', type: '銀行', cents: 90000 },
+        { name: '現金', type: '現金', cents: 3000 },
+        { name: 'LINE Pay 錢包', type: '電子支付', cents: 2000 },
+        { name: '悠遊卡', type: '其他', cents: 500, partial: true },
+        { name: '凱基／卡', type: '信用卡', cents: -20000, liability: true }
+      ]
+    }
+  };
+  assert.deepEqual(netAssets(s), {
+    bank: 90000,
+    other: 5500,
+    stocks: 50000,
+    cards: 20000,
+    cents: 125500,
+    partial: true
+  });
+  assert.deepEqual(
+    assetParts(s).map(p => [p.name, p.cents]),
+    [
+      ['銀行存款', 90000],
+      ['現金', 3000],
+      ['股票市值', 50000],
+      ['LINE Pay 錢包', 2000],
+      ['其他帳戶', 500]
+    ]
+  );
+  // Cash not set yet does not make the estimate partial by itself.
+  s.accountBalances.accounts[3].partial = false;
+  s.accountBalances.accounts[1].partial = true;
+  assert.equal(netAssets(s).partial, false);
+});

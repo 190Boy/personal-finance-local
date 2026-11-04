@@ -158,11 +158,13 @@ test('the summary carries balances; a cash setting is saved and used', async () 
   const store = sheetsApi(tables);
   await store.metadata();
   let r = await store.summary();
-  assert.equal(r.balances.accounts.find(a => a.name === '玉山銀行／玉山銀行帳戶').cents, 500000);
+  assert.equal(r.accountBalances.accounts.find(a => a.name === '玉山銀行／玉山銀行帳戶').cents, 500000);
+  // The bank-statement list keeps its own name for the home page.
+  assert.deepEqual([r.balances.length, r.totalCents], [1, 500000]);
   await store.saveAccountSetting(settingsRow('現金', 120000, '2026-10-20'));
   assert.equal(tables['帳戶設定'].length, 2);
   r = await store.summary();
-  assert.equal(r.balances.accounts.find(a => a.name === '現金').cents, 120000);
+  assert.equal(r.accountBalances.accounts.find(a => a.name === '現金').cents, 120000);
 });
 
 test('cash is set as of 00:00 on the day: that day counts forwards, earlier days are worked out backwards', () => {

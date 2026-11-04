@@ -459,7 +459,8 @@ export class GoogleStore {
       credits,
       matching,
       manual,
-      balances,
+      // Not `balances`: bankSummary already returns the bank-statement list under that name.
+      accountBalances: balances,
       history: { ...history, warnings }
     };
   }

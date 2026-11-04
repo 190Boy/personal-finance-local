@@ -155,8 +155,6 @@ function clearSummary() {
   clearMatching();
   renderManual(null);
   renderAccounts(null);
-  $('bankDeposit').textContent = '尚未同步';
-  $('bankDepositDetail').textContent = '連接 Google 後載入各帳戶最後餘額。';
   $('cloudSheetLink').hidden = true;
 }
 // Monthly fixed items that came due since the last visit become hand entries, then the summary is read again.
@@ -182,40 +180,13 @@ async function summary() {
   renderAssets(result);
   renderHistory(result.history);
   renderMatching(result.matching);
-  renderManual(result.manual || [], result.balances?.names);
-  renderAccounts(result.balances);
-  renderRecurring(result.recurring, result.balances?.names, result.generated);
+  renderManual(result.manual || [], result.accountBalances?.names);
+  renderAccounts(result.accountBalances);
+  renderRecurring(result.recurring, result.accountBalances?.names, result.generated);
   renderReports(result.history.rows, result.budgets);
-  askCashIfNeeded(result.balances);
+  askCashIfNeeded(result.accountBalances);
   accountChoices?.update(result.accounts || {});
   setCardAccounts(result.cardAccounts || {}, true);
-  $('bankDeposit').textContent = result.balances.length
-    ? (result.pending.length ? '部分合計 NT$ ' : 'NT$ ') +
-      (result.totalCents / 100).toLocaleString('zh-TW', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      })
-    : '尚無可核對餘額';
-  $('bankDepositDetail').textContent =
-    (result.balances.length
-      ? result.balances
-          .map(
-            b =>
-              b.bank +
-              '／' +
-              b.account +
-              '：' +
-              (b.cents / 100).toLocaleString('zh-TW') +
-              '（' +
-              b.date +
-              '）'
-          )
-          .join('；')
-      : '尚無已儲存的銀行明細。') +
-    (result.pending.length
-      ? '；' + result.pending.length + ' 個帳戶餘額或交易先後待確認，未列入合計。'
-      : '') +
-    ' 此為匯入明細最後餘額，非銀行即時餘額。';
   $('cloudSheetLink').href =
     store.file.webViewLink ||
     'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(store.file.id) + '/edit';
