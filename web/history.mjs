@@ -2,6 +2,7 @@ import { filterHistory } from '../cloud/history.mjs';
 import { CATEGORY_TREE, MAIN_CATEGORIES, iconOf, isInternal, monthTotals } from '../cloud/categories.mjs';
 import { decisionRow } from '../cloud/matching.mjs';
 import { hash } from '../cloud/records.mjs';
+import { row as listRow, dayHeader, groupByDay } from './rows.mjs';
 const $ = id => document.getElementById(id);
 let data = null,
   limit = 100,
@@ -102,7 +103,7 @@ function draw() {
     }),
     Object.assign(document.createElement('p'), {
       className: 'muted',
-      textContent: '合計不含內部轉帳（繳卡費、儲值、提款、買股票）與股票股數。'
+      textContent: '不含內部轉帳與股票股數'
     })
   );
   $('historyRows').replaceChildren();
@@ -136,44 +137,9 @@ function draw() {
     }
     if (r.conflict) tr.className = 'bad';
     $('historyRows').append(tr);
-    const card = document.createElement('article');
-    card.className = 'history-card';
-    const title = document.createElement('h3');
-    title.textContent = r.summary || '摘要待核對';
-    const meta = document.createElement('p');
-    meta.className = 'muted';
-    meta.textContent = r.date + ' ' + r.time + ' · ' + r.source + '／' + r.account + ' · ' + r.kind;
-    card.append(meta, title);
-    if (r.category) card.append(categoryChip(r));
-    if (isInternal(r.category)) card.classList.add('internal');
-    const dl = document.createElement('dl');
-    for (const [label, value] of credit
-      ? [
-          ['帳單明細金額', r.cardAmount],
-          ['支出（退款為負數）', r.expense]
-        ]
-      : [
-          [stock ? '提出股數' : '支出', r.expense],
-          [stock ? '存入股數' : '收入', r.income],
-          [stock ? '結存股數' : '餘額', r.balance],
-          ...(stock ? [] : [['手續費', r.fee]])
-        ]) {
-      const block = document.createElement('div'),
-        dt = document.createElement('dt'),
-        dd = document.createElement('dd');
-      dt.textContent = label;
-      dd.textContent = shownNumber(value) + (stock ? ' 股' : ' 元');
-      block.append(dt, dd);
-      dl.append(block);
-    }
-    card.append(dl);
-    const review = document.createElement('p');
-    review.className = 'review' + (r.conflict ? ' bad' : ' muted');
-    review.textContent = values[11];
-    card.append(review);
-    if (r.match) card.append(...matchBlock(r.match));
-    $('historyCards').append(card);
   }
+  drawCards(rows.slice(0, limit));
+
   if (data.warnings?.length)
     $('historyCount').textContent =
       '部分來源未載入。' + $('historyCount').textContent + ' ' + data.warnings.join('；');
@@ -199,6 +165,16 @@ export function initHistory() {
       limit = 100;
       draw();
     });
+  // ◀ goes to the older month; the list is newest first.
+  const stepMonth = by => {
+    const m = $('historyMonth'),
+      next = m.selectedIndex + by;
+    if (next < 0 || next >= m.options.length) return;
+    m.selectedIndex = next;
+    m.dispatchEvent(new Event('input'));
+  };
+  $('historyPrevMonth').addEventListener('click', () => stepMonth(1));
+  $('historyNextMonth').addEventListener('click', () => stepMonth(-1));
   $('historyMore').addEventListener('click', () => {
     limit += 100;
     draw();
@@ -217,6 +193,82 @@ export function initHistory() {
     draw();
   });
   clearHistory();
+}
+
+// Signed cents a row adds to its day: spending negative, income positive, transfers and shares not counted.
+function netOf(r) {
+  if (r.kind === '股票股數' || isInternal(r.category)) return 0;
+  const e = Number(r.expense),
+    i = Number(r.income);
+  return Math.round(((Number.isFinite(i) ? i : 0) - (Number.isFinite(e) ? e : 0)) * 100);
+}
+function drawCards(rows) {
+  const box = $('historyCards');
+  for (const g of groupByDay(rows, r => r.date || '日期待核對', netOf)) {
+    box.append(dayHeader(g.date, g.cents));
+    for (const r of g.items) {
+      const stock = r.kind === '股票股數',
+        credit = r.kind === '信用卡',
+        internal = isInternal(r.category);
+      const e = Number(r.expense),
+        i = Number(r.income);
+      const cents = Math.round(((Number.isFinite(i) ? i : 0) - (Number.isFinite(e) ? e : 0)) * 100);
+      const detail = document.createElement('div');
+      detail.className = 'row-extra';
+      detail.hidden = true;
+      const item = listRow({
+        category: r.category || (stock ? '投資' : ''),
+        icon: stock ? '📈' : undefined,
+        title: r.summary || '摘要待核對',
+        sub: [
+          r.source === r.account ? r.source : r.source + '／' + r.account,
+          r.category ? r.category.split('／').pop() : ''
+        ]
+          .filter(Boolean)
+          .join('－'),
+        cents: stock ? null : cents,
+        amountText: stock ? shownNumber(Number.isFinite(i) && i ? i : -e) + ' 股' : undefined,
+        side:
+          (r.match?.invoice ? '🧾 ' : '') + (r.time && !r.time.startsWith('00:00') ? r.time.slice(0, 5) : ''),
+        dim: internal || stock,
+        onClick: () => (detail.hidden = !detail.hidden)
+      });
+      if (r.conflict) item.classList.add('bad');
+      const meta = document.createElement('p');
+      meta.className = 'muted';
+      meta.textContent = [r.date + ' ' + r.time, r.source + '／' + r.account, r.kind].join(' · ');
+      detail.append(meta);
+      if (r.category) detail.append(categoryChip(r));
+      const dl = document.createElement('dl');
+      for (const [label, value] of credit
+        ? [
+            ['帳單明細金額', r.cardAmount],
+            ['支出（退款為負數）', r.expense]
+          ]
+        : [
+            [stock ? '提出股數' : '支出', r.expense],
+            [stock ? '存入股數' : '收入', r.income],
+            [stock ? '結存股數' : '餘額', r.balance],
+            ...(stock ? [] : [['手續費', r.fee]])
+          ]) {
+        const block = document.createElement('div'),
+          dt = document.createElement('dt'),
+          dd = document.createElement('dd');
+        dt.textContent = label;
+        dd.textContent = shownNumber(value) + (stock ? ' 股' : ' 元');
+        block.append(dt, dd);
+        dl.append(block);
+      }
+      detail.append(dl);
+      const review = document.createElement('p');
+      review.className = 'review' + (r.conflict ? ' bad' : ' muted');
+      review.textContent =
+        (r.conflict ? '相同 ID 內容衝突，全部保留／' : '') + (r.review || '未提供核對結果');
+      detail.append(review);
+      if (r.match) detail.append(...matchBlock(r.match));
+      box.append(item, detail);
+    }
+  }
 }
 
 // A matched invoice shows what the line on the statement actually bought.

@@ -1,5 +1,7 @@
 import { monthReport, budgetStatus, TOTAL } from '../cloud/budget.mjs';
 import { localToday } from '../cloud/recurring.mjs';
+import { isInternal } from '../cloud/categories.mjs';
+import { row, dayHeader, groupByDay } from './rows.mjs';
 const $ = id => document.getElementById(id);
 const yuan = c => Math.round(c / 100).toLocaleString('zh-TW');
 // The same balances as 帳戶與餘額, grouped by kind.
@@ -82,23 +84,51 @@ function renderMonth(summary) {
   box.hidden = !rows;
   if (!rows) return;
   const month = localToday().slice(0, 7),
-    report = monthReport(rows, month);
-  $('homeMonthTitle').textContent = +month.slice(5) + ' 月收支';
-  $('homeExpense').textContent = yuan(report.expenseCents);
+    report = monthReport(rows, month),
+    net = report.incomeCents - report.expenseCents;
+  $('homeMonthTitle').textContent = +month.slice(5) + ' 月結餘';
+  $('homeNet').textContent = (net < 0 ? '−' : '') + yuan(Math.abs(net));
+  $('homeNet').className = net < 0 ? 'out' : 'in';
   $('homeIncome').textContent = yuan(report.incomeCents);
-  $('homeNet').textContent = yuan(report.incomeCents - report.expenseCents);
+  $('homeExpense').textContent = yuan(report.expenseCents);
+  const top = Math.max(report.incomeCents, report.expenseCents, 1);
+  $('homeIncomeBar').style.width = ((100 * report.incomeCents) / top).toFixed(1) + '%';
+  $('homeExpenseBar').style.width = ((100 * report.expenseCents) / top).toFixed(1) + '%';
   const total = budgetStatus(summary.budgets || new Map(), report).find(b => b.name === TOTAL);
-  const top = report.byCategory[0];
-  $('homeMonthDetail').textContent =
-    [
-      total
-        ? total.leftCents >= 0
-          ? '總預算還剩 ' + yuan(total.leftCents) + ' 元（已用 ' + Math.round(total.ratio * 100) + '%）'
-          : '⚠ 已超出總預算 ' + yuan(-total.leftCents) + ' 元'
-        : '還沒有設定預算',
-      top ? '花最多的是' + top.name + ' ' + yuan(top.cents) + ' 元' : '這個月還沒有支出紀錄'
-    ].join('；') + '。不含股票與自己帳戶之間的轉帳。';
-  $('homeMonthDetail').className = total && total.leftCents < 0 ? 'bad' : 'muted';
+  $('homeBudget').textContent = total
+    ? total.leftCents >= 0
+      ? yuan(total.leftCents)
+      : '超出 ' + yuan(-total.leftCents)
+    : '＋ 設定預算';
+  $('homeBudget').className = total && total.leftCents < 0 ? 'out' : '';
+  $('homeBudgetBar').style.width = total ? Math.max(0, 100 - total.ratio * 100).toFixed(1) + '%' : '0%';
+  $('homeBudgetBar').classList.toggle('over', !!total && total.leftCents < 0);
+  const big = report.byCategory[0];
+  $('homeMonthDetail').textContent = big ? '花最多：' + big.name + ' ' + yuan(big.cents) : '';
+}
+function renderRecent(summary) {
+  const section = $('homeRecentSection');
+  if (!section) return;
+  const rows = (summary?.history?.rows || []).filter(r => r.kind !== '股票股數').slice(0, 8);
+  section.hidden = !rows.length;
+  const box = $('homeRecent');
+  box.replaceChildren();
+  const netOf = r =>
+    isInternal(r.category) ? 0 : Math.round(((Number(r.income) || 0) - (Number(r.expense) || 0)) * 100);
+  for (const g of groupByDay(rows, r => r.date, netOf)) {
+    box.append(dayHeader(g.date, g.cents));
+    for (const r of g.items)
+      box.append(
+        row({
+          category: r.category,
+          title: r.summary || '—',
+          sub: [r.account, (r.category || '').split('／').pop()].filter(Boolean).join('－'),
+          cents: Math.round(((Number(r.income) || 0) - (Number(r.expense) || 0)) * 100),
+          dim: isInternal(r.category),
+          onClick: () => (location.hash = '#transactions')
+        })
+      );
+  }
 }
 function renderBank(summary) {
   const g = accountGroups(summary);
@@ -136,11 +166,13 @@ export function renderAssets(summary) {
     credits = summary?.credits;
   const net = netAssets(summary);
   renderMonth(summary);
+  renderRecent(summary);
   renderBank(summary);
+  $('homeAssets').textContent = net ? yuan(net.cents + net.cards) : '—';
   $('creditCardDebt').textContent = credits?.accounts.length
-    ? (credits.pending.length ? '部分合計 NT$ ' : 'NT$ ') + money(credits.totalCents)
+    ? yuan(credits.totalCents) + (credits.pending.length ? '（部分）' : '')
     : summary
-      ? '尚無信用卡明細'
+      ? '—'
       : '尚未同步';
   $('creditCardMonth').textContent = credits?.accounts.length
     ? [...new Set(credits.accounts.map(a => a.month))].sort().join('／')
@@ -168,7 +200,11 @@ export function renderAssets(summary) {
         : '') +
       ' 各帳戶只取最新帳單月份、種類為「消費」的明細。繳款、退款、費用、分期當期與待核對不列入此合計；這不是銀行確認的實際待繳。'
     : '連接 Google 後載入最新帳單月份的消費合計。';
-  $('netAssets').textContent = net ? '估算 NT$ ' + money(net.cents) : summary ? '尚無可計算資料' : '尚未同步';
+  $('netAssets').textContent = net
+    ? (net.cents < 0 ? '−' : '') + yuan(Math.abs(net.cents))
+    : summary
+      ? '尚無資料'
+      : '尚未同步';
   $('netAssetDetail').textContent = net
     ? '銀行存款 NT$ ' +
       money(net.bank) +
@@ -206,9 +242,7 @@ export function renderAssets(summary) {
   const parts = assetParts(summary),
     total = parts.reduce((s, p) => s + p.cents, 0);
   $('assetChartNotice').textContent = total
-    ? '已載入正值資產合計 NT$ ' +
-      money(total) +
-      '。包含帳戶與餘額頁的銀行、現金、錢包與股票報表市值，非完整淨資產；負值、待核對帳戶及未載入來源未列入。'
+    ? '合計 ' + yuan(total) + '，不含負值與待核對的帳戶。'
     : '尚無可顯示的正值資產；請連接 Google 並匯入資料。';
   if (!total) return;
   const ns = 'http://www.w3.org/2000/svg',
@@ -236,7 +270,10 @@ export function renderAssets(summary) {
     svg.append(c);
     offset += 100 * fraction;
     const li = document.createElement('li');
-    li.textContent = p.name + '：NT$ ' + money(p.cents) + '（' + (100 * fraction).toFixed(1) + '%）';
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = p.color;
+    li.append(swatch, ' ' + p.name + ' ' + yuan(p.cents) + '（' + Math.round(100 * fraction) + '%）');
     $('assetLegend').append(li);
   }
   $('assetPie').append(svg);

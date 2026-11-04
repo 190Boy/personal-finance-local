@@ -1,6 +1,7 @@
 import { recurringItem, recurringRow, nextDue, localToday } from '../cloud/recurring.mjs';
 import { CATEGORY_TREE, iconOf } from '../cloud/categories.mjs';
 import { transferCategory } from '../cloud/balances.mjs';
+import { row } from './rows.mjs';
 const $ = id => document.getElementById(id);
 const money = c => (c / 100).toLocaleString('zh-TW', { maximumFractionDigits: 2 });
 const messages = {
@@ -81,6 +82,7 @@ function fill(item = null) {
   $('recurringNote').value = item?.note || '';
   $('recurringSave').textContent = item ? '儲存修改' : '新增固定收支';
   $('recurringCancel').hidden = !item;
+  $('recurringDelete').hidden = !item;
 }
 async function save(rows, done) {
   busy = true;
@@ -105,7 +107,7 @@ function el(tag, text, className) {
   return e;
 }
 function draw() {
-  $('recurringSave').disabled = busy;
+  $('recurringSave').disabled = $('recurringDelete').disabled = busy;
   const box = $('recurringList');
   box.replaceChildren();
   if (!items) {
@@ -122,39 +124,28 @@ function draw() {
   for (const it of items)
     if (it.type === '支出') out += it.amountCents;
     else if (it.type === '收入') inc += it.amountCents;
-  box.append(el('p', '每月固定支出 ' + money(out) + ' 元，固定收入 ' + money(inc) + ' 元。', 'muted'));
+  box.append(el('p', '每月固定支出 ' + money(out) + '，固定收入 ' + money(inc), 'muted list-note'));
   for (const it of items) {
-    const card = el('article', null, 'invoice-card'),
-      top = el('div', null, 'top'),
-      actions = el('div', null, 'actions');
-    const icon = it.type === '轉帳' ? '🔁' : iconOf(it.category);
-    top.append(
-      el('h3', icon + ' ' + it.name),
-      el('span', (it.type === '收入' ? '+' : '') + money(it.amountCents) + ' 元', 'amount')
+    const transfer = it.type === '轉帳',
+      next = nextDue(it, today);
+    box.append(
+      row({
+        category: transfer ? '內部轉帳' : it.category,
+        icon: transfer ? '🔁' : undefined,
+        title: it.name,
+        sub: ['每月 ' + it.day + ' 號', transfer ? it.method + ' → ' + it.party : it.method].join('－'),
+        cents: transfer ? null : it.type === '收入' ? it.amountCents : -it.amountCents,
+        amountText: transfer ? money(it.amountCents) : undefined,
+        side: next ? '下次 ' + next.slice(5).replace('-', '/') : '已結束',
+        dim: transfer || !next,
+        onClick: () => {
+          if (busy) return;
+          fill(it);
+          $('recurringStatus').textContent = '';
+          $('recurringForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      })
     );
-    const next = nextDue(it, today);
-    const meta = [
-      '每月 ' + it.day + ' 號',
-      it.type === '轉帳' ? it.method + ' → ' + it.party : it.method,
-      it.type === '轉帳' ? '' : it.category,
-      it.start + ' 起' + (it.end ? '，到 ' + it.end : ''),
-      next ? '下次 ' + next : '已結束'
-    ];
-    const edit = el('button', '修改', 'secondary'),
-      remove = el('button', '停用', 'secondary');
-    edit.type = remove.type = 'button';
-    edit.disabled = remove.disabled = busy;
-    edit.addEventListener('click', () => {
-      fill(it);
-      $('recurringForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    remove.addEventListener('click', () => {
-      if (!busy)
-        void save([recurringRow(it, { deleted: true })], '已停用：' + it.name + '。已產生的記帳會保留。');
-    });
-    actions.append(edit, remove);
-    card.append(top, el('p', meta.filter(Boolean).join(' · '), 'meta'), actions);
-    box.append(card);
   }
 }
 export function renderRecurring(list, names, generated = []) {
@@ -211,6 +202,12 @@ export function initRecurring(api) {
         (was ? '已修改：' : '已新增：') + item.name + ' ' + money(item.amountCents) + ' 元。'
       )
     )
+      fill();
+  });
+  $('recurringDelete').addEventListener('click', async () => {
+    if (busy || !editing) return;
+    const it = editing;
+    if (await save([recurringRow(it, { deleted: true })], '已停用：' + it.name + '。已產生的記帳會保留。'))
       fill();
   });
   $('recurringCancel').addEventListener('click', () => {

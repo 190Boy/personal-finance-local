@@ -110,20 +110,16 @@ function updateRoute(focus = false) {
   document.querySelectorAll('[data-route]').forEach(view => {
     view.hidden = view.dataset.route !== route;
   });
+  const section = ['matching', 'recurring'].includes(route)
+    ? 'transactions'
+    : ['home', 'accounts', 'manual', 'transactions', 'reports'].includes(route)
+      ? route
+      : '';
   document.querySelectorAll('[data-nav]').forEach(link => {
-    if (
-      link.dataset.nav ===
-      (['stocks', 'bank-import', 'cards', 'invoices', 'linepay'].includes(route)
-        ? 'import'
-        : ['matching', 'manual', 'recurring'].includes(route)
-          ? 'transactions'
-          : ['accounts', 'reports'].includes(route)
-            ? 'home'
-            : route)
-    )
-      link.setAttribute('aria-current', 'page');
+    if (link.dataset.nav === section) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   });
+  document.querySelector('.topmenu')?.removeAttribute('open');
   $('emptyTransactions').hidden = !!result;
   if (focus) {
     const view = document.querySelector('[data-route="' + route + '"]');
@@ -707,3 +703,23 @@ setHistoryCloud(cloud);
 initAccountsView(cloud);
 initRecurring(cloud);
 initReports(cloud);
+// Long explanations stay folded behind a ？ next to the page title.
+for (const view of document.querySelectorAll('[data-route]')) {
+  const title = view.querySelector('.route-title');
+  if (!title || !view.querySelector('.help')) continue;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'help-toggle';
+  b.textContent = '?';
+  b.setAttribute('aria-label', '說明');
+  b.setAttribute('aria-expanded', 'false');
+  b.addEventListener('click', () => {
+    const open = view.classList.toggle('show-help');
+    b.setAttribute('aria-expanded', String(open));
+  });
+  title.append(b);
+}
+document.addEventListener('click', e => {
+  const menu = document.querySelector('.topmenu');
+  if (menu?.open && !menu.contains(e.target)) menu.removeAttribute('open');
+});

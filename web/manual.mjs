@@ -3,6 +3,7 @@ import { CATEGORY_TREE, iconOf, normalizeCategory, mainOf } from '../cloud/categ
 import { transferCategory, resolveAccount } from '../cloud/balances.mjs';
 import { decisionRow, PAYMENT_METHODS } from '../cloud/matching.mjs';
 import { hash } from '../cloud/records.mjs';
+import { row, dayHeader, groupByDay } from './rows.mjs';
 const $ = id => document.getElementById(id);
 const money = c => (c / 100).toLocaleString('zh-TW', { maximumFractionDigits: 2 });
 const messages = {
@@ -69,17 +70,23 @@ function setType(type) {
   $('manualType').value = type;
   const transfer = type === '轉帳';
   $('manualCategoryBlock').hidden = transfer;
+  $('manualCategoryButton').hidden = transfer;
   $('manualToLabel').hidden = !transfer;
   $('manualPartyLabel').hidden = transfer;
-  $('manualMethodLabel').textContent = transfer ? '轉出帳戶' : '付款方式／帳戶';
+  $('manualMethodLabel').textContent = transfer ? '轉出帳戶' : '帳戶';
   for (const b of document.querySelectorAll('.type-tab'))
     b.setAttribute('aria-selected', String(b.dataset.type === type));
   drawCategories();
 }
 function setCategory(category) {
   $('manualCategory').value = category || '';
-  $('manualCategoryName').textContent = category ? iconOf(category) + ' ' + category : '尚未選擇';
+  $('manualCategoryIcon').textContent = category ? iconOf(category) : '＋';
+  $('manualCategoryName').textContent = category ? category.replace('／', ' · ') : '選分類';
   drawCategories();
+}
+function showPicker(open) {
+  $('manualCategoryPicker').hidden = !open;
+  $('manualCategoryButton').setAttribute('aria-expanded', String(open));
 }
 function drawCategories() {
   const type = $('manualType').value,
@@ -97,7 +104,10 @@ function drawCategories() {
       Object.assign(document.createElement('span'), { className: 'icon', textContent: c.icon }),
       c.name
     );
-    b.addEventListener('click', () => setCategory(c.name));
+    b.addEventListener('click', () => {
+      setCategory(c.name);
+      if (!c.subs.length) showPicker(false);
+    });
     grid.append(b);
   }
   const main = groups.find(c => c.name === mainOf(chosen));
@@ -107,9 +117,10 @@ function drawCategories() {
       b.type = 'button';
       b.className = 'sub-chip' + (chosen === main.name + '／' + sub ? ' on' : '');
       b.textContent = sub;
-      b.addEventListener('click', () =>
-        setCategory(chosen === main.name + '／' + sub ? main.name : main.name + '／' + sub)
-      );
+      b.addEventListener('click', () => {
+        setCategory(chosen === main.name + '／' + sub ? main.name : main.name + '／' + sub);
+        showPicker(false);
+      });
       subs.append(b);
     }
 }
@@ -149,9 +160,11 @@ function fill(values = {}) {
   if (values.type === '轉帳') $('manualTo').value = resolveAccount(values.party, accountList);
   $('manualParty').value = values.party || '';
   setCategory(normalizeCategory(values.category, values.type || '支出'));
+  showPicker(!$('manualCategory').value && (values.type || '支出') !== '轉帳');
   $('manualNote').value = values.note || '';
   $('manualSave').textContent = editing ? '儲存修改' : '儲存';
   $('manualCancel').hidden = !editing && !gapId;
+  $('manualDelete').hidden = !editing;
   $('manualContext').textContent = editing
     ? '正在修改 ' + editing.date + ' 的紀錄。'
     : gapId
@@ -159,10 +172,7 @@ function fill(values = {}) {
       : '';
 }
 function controls() {
-  for (const id of ['manualSave', 'manualCancel']) $(id).disabled = busy;
-  $('manualList')
-    .querySelectorAll('button')
-    .forEach(b => (b.disabled = busy));
+  for (const id of ['manualSave', 'manualCancel', 'manualDelete']) $(id).disabled = busy;
 }
 async function save(rows, decisions, done) {
   busy = true;
@@ -198,54 +208,36 @@ function draw() {
     );
     return;
   }
-  for (const e of entries.slice(0, shown)) {
-    const card = document.createElement('article'),
-      top = document.createElement('div'),
-      h = document.createElement('h3'),
-      amount = document.createElement('span'),
-      meta = document.createElement('p'),
-      actions = document.createElement('div');
-    card.className = 'invoice-card';
-    top.className = 'top';
-    h.textContent = iconOf(normalizeCategory(e.category, e.type)) + ' ' + (e.party || e.category || e.type);
-    amount.className = 'amount';
-    amount.textContent = (e.type === '收入' ? '+' : '') + money(e.amountCents) + ' 元';
-    meta.className = 'meta';
-    meta.textContent = [e.date + (e.time ? ' ' + e.time : ''), e.method, e.category, e.note]
-      .filter(Boolean)
-      .join(' · ');
-    actions.className = 'actions';
-    const edit = Object.assign(document.createElement('button'), {
-      type: 'button',
-      className: 'secondary',
-      textContent: '修改'
-    });
-    edit.addEventListener('click', () => {
-      fill(e);
-      $('manualForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    const remove = Object.assign(document.createElement('button'), {
-      type: 'button',
-      className: 'secondary',
-      textContent: '刪除'
-    });
-    remove.addEventListener('click', () => {
-      if (busy) return;
-      void save(
-        [manualRow(e, { deleted: true })],
-        [],
-        '已刪除：' + h.textContent + ' ' + money(e.amountCents) + ' 元。'
+  const net = e => (e.type === '收入' ? e.amountCents : e.type === '轉帳' ? 0 : -e.amountCents);
+  for (const g of groupByDay(entries.slice(0, shown), e => e.date, net)) {
+    box.append(dayHeader(g.date, g.cents));
+    for (const e of g.items) {
+      const category = normalizeCategory(e.category, e.type);
+      const transfer = e.type === '轉帳';
+      box.append(
+        row({
+          category,
+          icon: transfer ? '🔁' : undefined,
+          title: transfer ? '轉帳 → ' + e.party : category.split('／').pop() || e.type,
+          sub: [e.method, transfer ? '' : e.party, e.note].filter(Boolean).join('－'),
+          cents: transfer ? null : net(e),
+          amountText: transfer ? (e.amountCents / 100).toLocaleString('zh-TW') : undefined,
+          side: e.time || '',
+          dim: transfer,
+          onClick: () => {
+            if (busy) return;
+            fill(e);
+            $('manualStatus').textContent = '';
+            $('manualForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        })
       );
-    });
-    actions.append(edit, remove);
-    top.append(h, amount);
-    card.append(top, meta, actions);
-    box.append(card);
+    }
   }
   if (entries.length > shown) {
     const more = Object.assign(document.createElement('button'), {
       type: 'button',
-      className: 'secondary',
+      className: 'secondary more',
       textContent: '再顯示 30 筆'
     });
     more.addEventListener('click', () => {
@@ -309,6 +301,31 @@ export function initManual(api) {
       : [];
     const label = (entry.party || entry.category || entry.type) + ' ' + money(entry.amountCents) + ' 元';
     if (await save([manualRow(entry)], decisions, (editing ? '已修改：' : '已記錄：') + label + '。')) fill();
+  });
+  $('manualCategoryButton').addEventListener('click', () => showPicker($('manualCategoryPicker').hidden));
+  const step = days => {
+    const d = new Date(($('manualDate').value || today()) + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    $('manualDate').value =
+      d.getFullYear() +
+      '-' +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      '-' +
+      String(d.getDate()).padStart(2, '0');
+  };
+  $('manualPrevDay').addEventListener('click', () => step(-1));
+  $('manualNextDay').addEventListener('click', () => step(1));
+  $('manualDelete').addEventListener('click', async () => {
+    if (busy || !editing) return;
+    const e = editing;
+    if (
+      await save(
+        [manualRow(e, { deleted: true })],
+        [],
+        '已刪除：' + (e.party || e.category || e.type) + ' ' + money(e.amountCents) + ' 元。'
+      )
+    )
+      fill();
   });
   $('manualCancel').addEventListener('click', () => {
     fill();
