@@ -2,6 +2,7 @@
 // 「預算」工作表只新增不修改，每個分類取最新一列；金額 0 代表取消這個分類的預算。
 import { moneyCents } from '../pdf-parser/parser.mjs';
 import { CATEGORY_TREE, isInternal, mainOf } from './categories.mjs';
+const INCOME_CATEGORIES = CATEGORY_TREE.收入.map(c => c.name);
 
 export const BUDGET_HEADERS = ['分類', '每月預算（元）', '更新時間'];
 export const TOTAL = '總預算';
@@ -44,7 +45,8 @@ function amounts(r) {
 const monthOf = r => String(r.date || '').slice(0, 7);
 
 export function monthReport(rows, month) {
-  const by = new Map();
+  const by = new Map(),
+    byIncome = new Map();
   let expense = 0,
     income = 0;
   for (const r of rows) {
@@ -58,12 +60,23 @@ export function monthReport(rows, month) {
       const main = EXPENSE_CATEGORIES.includes(mainOf(r.category)) ? mainOf(r.category) : '其他';
       by.set(main, (by.get(main) || 0) + a.expense);
     }
+    if (a.income) {
+      const main = INCOME_CATEGORIES.includes(mainOf(r.category)) ? mainOf(r.category) : '其他收入';
+      byIncome.set(main, (byIncome.get(main) || 0) + a.income);
+    }
   }
-  const byCategory = [...by]
-    .map(([name, cents]) => ({ name, cents }))
-    .filter(c => c.cents > 0)
-    .sort((a, b) => b.cents - a.cents);
-  return { month, expenseCents: expense, incomeCents: income, byCategory };
+  const sorted = map =>
+    [...map]
+      .map(([name, cents]) => ({ name, cents }))
+      .filter(c => c.cents > 0)
+      .sort((a, b) => b.cents - a.cents);
+  return {
+    month,
+    expenseCents: expense,
+    incomeCents: income,
+    byCategory: sorted(by),
+    incomeByCategory: sorted(byIncome)
+  };
 }
 
 export function monthsBack(month, count) {

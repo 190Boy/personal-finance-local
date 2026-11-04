@@ -2,24 +2,15 @@ import { monthReport, trend, budgetStatus, budgetRow, TOTAL, EXPENSE_CATEGORIES 
 import { iconOf } from '../cloud/categories.mjs';
 import { moneyCents } from '../pdf-parser/parser.mjs';
 import { localToday } from '../cloud/recurring.mjs';
+import { CATEGORY_COLORS } from './rows.mjs';
 const $ = id => document.getElementById(id);
 const SVG = 'http://www.w3.org/2000/svg';
 const yuan = c => Math.round(c / 100).toLocaleString('zh-TW');
-// Each category keeps its own color in every month (color follows the category, not its rank).
-const COLORS = {
-  餐飲: '#2a78d6',
-  交通: '#eb6834',
-  日用品: '#1baf7a',
-  購物: '#eda100',
-  娛樂: '#e87ba4',
-  居家: '#008300',
-  醫療: '#6250d6',
-  人情: '#e34948',
-  其他: '#8b8f96'
-};
+const COLORS = CATEGORY_COLORS;
 const INCOME = '#2a78d6',
   EXPENSE = '#eb6834';
 let cloud = null,
+  side = 'expense',
   rows = null,
   budgets = new Map(),
   busy = false;
@@ -48,16 +39,16 @@ function showInHistory(month, category) {
   c.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-function donut(report) {
+function donut(report, list = report.byCategory, label = '支出', income = false) {
   const wrap = el('div', null, 'report-donut');
-  const total = report.byCategory.reduce((s, c) => s + c.cents, 0);
-  const box = svg('svg', { viewBox: '0 0 200 200', role: 'img', 'aria-label': '本月支出依分類' });
+  const total = list.reduce((s, c) => s + c.cents, 0);
+  const box = svg('svg', { viewBox: '0 0 200 200', role: 'img', 'aria-label': '本月' + label + '依分類' });
   const R = 80,
     r = 52;
   let angle = -Math.PI / 2;
   const point = (a, rad) =>
     [100 + rad * Math.cos(a), 100 + rad * Math.sin(a)].map(n => n.toFixed(2)).join(' ');
-  for (const c of report.byCategory) {
+  for (const c of list) {
     const share = c.cents / total,
       end = angle + share * Math.PI * 2;
     let shape;
@@ -88,24 +79,23 @@ function donut(report) {
           ' 0 ' +
           point(angle, r) +
           ' Z',
-        stroke: '#fff',
         'stroke-width': 2
       });
     }
     if (shape.tagName === 'circle') shape.setAttribute('stroke', COLORS[c.name]);
     else shape.setAttribute('fill', COLORS[c.name]);
     shape.classList.add('slice');
-    shape.addEventListener('click', () => showInHistory(report.month, c.name));
+    if (!income) shape.addEventListener('click', () => showInHistory(report.month, c.name));
     box.append(tip(shape, c.name + ' ' + yuan(c.cents) + ' 元（' + Math.round(share * 100) + '%）'));
     angle = end;
   }
   const center = svg('text', { x: 100, y: 96, 'text-anchor': 'middle', class: 'donut-label' });
-  center.textContent = '支出';
+  center.textContent = '總' + label;
   const value = svg('text', { x: 100, y: 118, 'text-anchor': 'middle', class: 'donut-value' });
   value.textContent = yuan(total);
   box.append(center, value);
   const legend = el('ul', null, 'report-legend');
-  for (const c of report.byCategory) {
+  for (const c of list) {
     const li = el('li'),
       button = el('button');
     button.type = 'button';
@@ -119,6 +109,7 @@ function donut(report) {
       el('strong', yuan(c.cents))
     );
     button.addEventListener('click', () => showInHistory(report.month, c.name));
+    if (income) button.disabled = true;
     li.append(button);
     legend.append(li);
   }
@@ -347,32 +338,30 @@ function draw() {
     s.append(el('small', label), el('strong', yuan(cents)));
     totals.append(s);
   }
-  totals.append(el('p', '不含股票與自己帳戶之間的轉帳（繳卡費、儲值、提款）。', 'muted'));
   body.append(totals);
 
-  const budget = el('section', null, 'panel');
-  budget.append(el('h2', '預算'));
-  const status = budgetStatus(budgets, report);
-  if (status.length) budget.append(budgetBars(status));
-  else budget.append(el('p', '還沒有設定預算。可以只設總預算，也可以替個別分類設定。', 'muted'));
-  const edit = el('details');
-  edit.open = !status.length;
-  edit.append(el('summary', '設定每月預算'), budgetForm());
-  budget.append(edit);
-  body.append(budget);
-
+  const income = side === 'income',
+    list = income ? report.incomeByCategory : report.byCategory;
   const pie = el('section', null, 'panel');
-  pie.append(el('h2', '支出分類'));
-  if (report.byCategory.length) {
-    pie.append(donut(report));
-    pie.append(el('p', '點分類可以到交易明細看這個月的這類交易。', 'muted'));
-  } else pie.append(el('p', '這個月還沒有支出紀錄。', 'muted'));
+  if (list.length) pie.append(donut(report, list, income ? '收入' : '支出', income));
+  else pie.append(el('p', '這個月還沒有' + (income ? '收入' : '支出') + '紀錄。', 'muted'));
   body.append(pie);
+
+  if (!income) {
+    const budget = el('section', null, 'panel');
+    const status = budgetStatus(budgets, report);
+    const edit = el('details', null, 'inline-details');
+    edit.append(el('summary', status.length ? '預算　調整' : '預算　＋ 設定每月預算'), budgetForm());
+    budget.append(edit);
+    if (status.length) budget.append(budgetBars(status));
+    body.append(budget);
+  }
 
   const t = el('section', null, 'panel');
   t.append(el('h2', '近 6 個月收支'));
   t.append(bars(trend(rows, month, 6)));
   body.append(t);
+  body.append(el('p', '不含股票與自己帳戶之間的轉帳（繳卡費、儲值、提款）。', 'muted small'));
 }
 export function renderReports(list, budgetMap) {
   rows = list || null;
@@ -382,6 +371,22 @@ export function renderReports(list, budgetMap) {
 export function initReports(api) {
   cloud = api;
   $('reportsMonth').addEventListener('change', draw);
+  const step = by => {
+    const m = $('reportsMonth'),
+      next = m.selectedIndex + by;
+    if (next < 0 || next >= m.options.length) return;
+    m.selectedIndex = next;
+    draw();
+  };
+  $('reportsPrevMonth').addEventListener('click', () => step(1));
+  $('reportsNextMonth').addEventListener('click', () => step(-1));
+  for (const b of document.querySelectorAll('#view-reports .segmented button'))
+    b.addEventListener('click', () => {
+      side = b.dataset.side;
+      for (const o of document.querySelectorAll('#view-reports .segmented button'))
+        o.setAttribute('aria-selected', String(o === b));
+      draw();
+    });
   window.addEventListener('finance-signout', () => renderReports(null, new Map()));
   draw();
 }

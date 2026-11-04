@@ -1,8 +1,10 @@
 import { settingsRow, CASH } from '../cloud/balances.mjs';
 import { moneyCents } from '../pdf-parser/parser.mjs';
+import { row } from './rows.mjs';
 const $ = id => document.getElementById(id);
 const yuan = c => (c / 100).toLocaleString('zh-TW', { maximumFractionDigits: 2 });
 const ICONS = { 銀行: '🏦', 信用卡: '💳', 電子支付: '📱', 現金: '💵', 其他: '👛' };
+const TINTS = { 銀行: '#2a78d6', 信用卡: '#e34948', 電子支付: '#1baf7a', 現金: '#008300', 其他: '#8b8f96' };
 let cloud = null,
   data = null,
   busy = false,
@@ -63,58 +65,73 @@ function setupForm(account) {
   });
   return form;
 }
+// The big number on top, with assets and liabilities beside it.
+export function heroBlock(label, cents, sides) {
+  const hero = el('div', null, 'hero-number');
+  const left = el('div');
+  left.append(el('small', label), el('strong', (cents < 0 ? '−' : '') + yuan(Math.abs(cents))));
+  const right = el('div', null, 'hero-sides');
+  for (const [name, value, cls] of sides) {
+    const d = el('div');
+    d.append(el('small', name), el('span', yuan(value), cls));
+    right.append(d);
+  }
+  hero.append(left, right);
+  return hero;
+}
 function draw() {
   const box = $('accountsBody');
   box.replaceChildren();
   $('accountsEmpty').hidden = !!data;
   if (!data) return;
-  const totals = el('div', null, 'history-totals');
-  for (const [label, cents, cls] of [
-    ['資產', data.assetsCents, 'in'],
-    ['信用卡消費', data.liabilitiesCents, 'out'],
-    ['差額', data.assetsCents - data.liabilitiesCents, 'net']
-  ]) {
-    const s = el('div', null, 'stat ' + cls);
-    s.append(el('small', label), el('strong', yuan(cents)));
-    totals.append(s);
-  }
-  totals.append(el('p', '不含股票；信用卡是最新帳單月份的消費合計，不是銀行確認的待繳。', 'muted'));
-  box.append(totals);
+  box.append(
+    heroBlock('資產減信用卡 TWD', data.assetsCents - data.liabilitiesCents, [
+      ['資產', data.assetsCents, 'in'],
+      ['信用卡', data.liabilitiesCents, 'out']
+    ])
+  );
   for (const type of ['現金', '銀行', '電子支付', '信用卡', '其他']) {
     const list = data.accounts.filter(a => a.type === type);
     if (!list.length) continue;
-    const section = el('section', null, 'panel');
-    section.append(el('h2', ICONS[type] + ' ' + type));
+    const group = el('section', null, 'group-card');
+    const head = el('div', null, 'group-head'),
+      total = list.reduce((s, a) => s + a.cents, 0);
+    head.append(
+      el('span', type),
+      el('span', (total < 0 ? '−' : '') + yuan(Math.abs(total)), total < 0 ? 'out' : 'in')
+    );
+    group.append(head);
     for (const a of list) {
-      const card = el('article', null, 'invoice-card account-card');
-      const top = el('div', null, 'top');
-      top.append(
-        el('h3', a.name),
-        el(
-          'span',
-          (a.liability ? '−' : '') + yuan(Math.abs(a.cents)) + ' 元',
-          'amount' + (a.cents < 0 ? ' negative' : '')
-        )
-      );
-      card.append(top, el('p', a.note, 'meta' + (a.partial ? ' bad' : '')));
-      if (a.type === '現金' || a.type === '其他') {
-        const d = el('details');
-        d.append(el('summary', a.type === '現金' ? '設定目前現金' : '設定目前餘額'));
-        d.append(
+      const settable = a.type === '現金' || a.type === '其他';
+      const r = row({
+        icon: ICONS[type],
+        tint: TINTS[type],
+        title: a.name,
+        sub: a.note,
+        amountText: (a.cents < 0 ? '−' : '') + yuan(Math.abs(a.cents)),
+        side: settable ? (a.partial ? '點這裡設定' : '點這裡重設') : '',
+        onClick: settable ? () => (form.hidden = !form.hidden) : undefined
+      });
+      if (a.partial) r.querySelector('.row-sub')?.classList.add('bad');
+      group.append(r);
+      let form = null;
+      if (settable) {
+        form = el('div', null, 'row-extra');
+        form.hidden = !a.partial || a.type !== '現金';
+        form.append(
           el(
             'p',
             a.name === CASH
-              ? '數一下錢包裡的現金填在這裡，會記成今天 00:00 的金額；今天以前的現金從這個時間點往回推。之後銀行明細裡的提款會自動加進來，不用另外記；花掉的現金請用手動記帳記下。'
+              ? '數一下錢包填在這裡，記成今天 00:00 的金額；之前的現金從這個時間點往回推。之後的提款自動加入，花掉的用記一筆記下。'
               : '填這個帳戶在某一天 00:00 的餘額，當天起的手動記帳會從這裡加減。',
             'muted'
           ),
           setupForm(a)
         );
-        card.append(d);
+        group.append(form);
       }
-      section.append(card);
     }
-    box.append(section);
+    box.append(group);
   }
 }
 export function renderAccounts(balances) {
