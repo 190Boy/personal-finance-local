@@ -1,5 +1,6 @@
 // 帳戶與餘額：銀行用對帳單最後的餘額、LINE Pay 錢包用最後一則通知的餘額，之後的手動記帳再加減上去；
 // 現金沒有任何對帳來源，從你設定的目前現金開始，加上銀行明細裡的提款與手動記帳。
+// 現金的設定一律以「填寫當天 00:00」為準：當天以後的流量往後加，當天以前的日期則從這個時間點往回推。
 import { moneyCents } from '../pdf-parser/parser.mjs';
 
 export const ACCOUNT_SETTINGS_HEADERS = ['帳戶', '期初餘額（元）', '期初日期', '備註', '更新時間'];
@@ -21,6 +22,7 @@ export function settingsTable(values) {
   }
   return latest;
 }
+// date is the day the amount was counted; it means the start of that day (00:00).
 export function settingsRow(name, cents, date, note = '') {
   return [name, cents / 100, date, note, new Date().toISOString()];
 }
@@ -122,25 +124,20 @@ export function computeBalances({
       partial: !base
     });
   }
-  // Cash: the amount the user counted on a date, then withdrawals from the bank statements and hand entries after it.
+  // Cash: the amount the user counted, as of 00:00 on that day; withdrawals and hand entries from that day on.
   const start = settings.get(CASH);
-  const withdrawals = bankRows.filter(
-    r =>
-      WITHDRAWAL.test(String(r[5] || '')) && Number(r[6]) > 0 && (!start?.date || String(r[3]) > start.date)
-  );
-  const cashManual = after(CASH, start?.date || '');
+  const flows = cashFlows(bankRows, manual, names).filter(f => !start?.date || f.date >= start.date);
+  const withdrawals = flows.filter(f => f.kind === 'withdrawal').length,
+    hand = flows.filter(f => f.kind === 'manual').length;
   accounts.push({
     name: CASH,
     type: '現金',
-    cents:
-      (start?.cents || 0) +
-      withdrawals.reduce((s, r) => s + Math.round(Number(r[6]) * 100), 0) +
-      cashManual.cents,
+    cents: (start?.cents || 0) + flows.reduce((s, f) => s + f.cents, 0),
     asOf: start?.date || '',
     note:
-      (start ? start.date + ' 設定的現金' : '尚未設定目前現金，從 0 開始') +
-      (withdrawals.length ? '，加上銀行提款 ' + withdrawals.length + ' 筆' : '') +
-      (cashManual.count ? '，手動記帳 ' + cashManual.count + ' 筆' : ''),
+      (start ? start.date + ' 00:00 設定的現金' : '尚未設定目前現金，從 0 開始') +
+      (withdrawals ? '，加上銀行提款 ' + withdrawals + ' 筆' : '') +
+      (hand ? '，手動記帳 ' + hand + ' 筆' : ''),
     partial: !start
   });
   for (const c of credits.accounts)
@@ -170,6 +167,30 @@ export function computeBalances({
   const assets = accounts.filter(a => !a.liability).reduce((s, a) => s + a.cents, 0),
     liabilities = accounts.filter(a => a.liability).reduce((s, a) => s - a.cents, 0);
   return { accounts, names, assetsCents: assets, liabilitiesCents: liabilities };
+}
+
+// Every movement of cash: withdrawals in the bank statements plus hand entries, each with its day.
+function cashFlows(bankRows, manual, names) {
+  const out = [];
+  for (const r of bankRows)
+    if (WITHDRAWAL.test(String(r[5] || '')) && Number(r[6]) > 0)
+      out.push({ date: String(r[3]), cents: Math.round(Number(r[6]) * 100), kind: 'withdrawal' });
+  for (const e of manual) {
+    const cents = flow(e, CASH, names);
+    if (cents) out.push({ date: e.date, cents, kind: 'manual' });
+  }
+  return out;
+}
+
+// Cash at 00:00 of any day, worked out from the counted amount: forwards by adding the flows from the
+// counting day up to the day before, backwards by taking back the flows from that day up to the counting day.
+export function cashAt(date, { bankRows = [], manual = [], settings = new Map(), names } = {}) {
+  const start = settings.get(CASH);
+  if (!start?.date) return null;
+  const all = cashFlows(bankRows, manual, names || accountNames({ manual, settings }));
+  const sum = list => list.reduce((s, f) => s + f.cents, 0);
+  if (date >= start.date) return start.cents + sum(all.filter(f => f.date >= start.date && f.date < date));
+  return start.cents - sum(all.filter(f => f.date >= date && f.date < start.date));
 }
 
 // A transfer's category follows from where the money went.

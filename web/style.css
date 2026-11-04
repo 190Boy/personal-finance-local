@@ -1060,3 +1060,26 @@ footer {
 .account-setup input[inputmode='decimal'] {
   grid-column: 1 / -1;
 }
+.account-setup.cash input[inputmode='decimal'] {
+  grid-column: auto;
+}
+.cash-dialog {
+  width: min(420px, calc(100vw - 32px));
+  border: 1px solid #dce5f0;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 12px 40px #18334e33;
+}
+.cash-dialog::backdrop {
+  background: #18334e66;
+}
+.cash-dialog h2 {
+  margin-top: 0;
+}
+.cash-dialog input {
+  width: 100%;
+  font-size: 1.2rem;
+}
+.nowrap {
+  white-space: nowrap;
+}

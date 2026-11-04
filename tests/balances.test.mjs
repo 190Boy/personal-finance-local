@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   computeBalances,
+  cashAt,
   resolveAccount,
   settingsTable,
   settingsRow,
@@ -162,4 +163,36 @@ test('the summary carries balances; a cash setting is saved and used', async () 
   assert.equal(tables['帳戶設定'].length, 2);
   r = await store.summary();
   assert.equal(r.balances.accounts.find(a => a.name === '現金').cents, 120000);
+});
+
+test('cash is set as of 00:00 on the day: that day counts forwards, earlier days are worked out backwards', () => {
+  const settings = settingsTable([
+    ACCOUNT_SETTINGS_HEADERS,
+    ['現金', 3000, '2026-11-04', '', '2026-11-04T09:00:00Z']
+  ]);
+  const bankRows = [
+    ['w1', '玉山銀行', '玉山銀行帳戶', '2026-11-04', '', 'ATM提款', 1000, 0],
+    ['w2', '玉山銀行', '玉山銀行帳戶', '2026-11-01', '', 'ATM提款', 2000, 0]
+  ];
+  const manual = [
+    entry('支出', '2026-11-04', '120', '現金'),
+    entry('支出', '2026-11-06', '80', '現金'),
+    entry('支出', '2026-11-02', '500', '現金'),
+    entry('收入', '2026-10-31', '100', '現金')
+  ];
+  const b = computeBalances({ bankRows, manual, settings });
+  const cash = b.accounts.find(a => a.name === '現金');
+  // 3,000 at 00:00 on 11/04, + the same-day 1,000 withdrawal − 120 − 80.
+  assert.equal(cash.cents, 300000 + 100000 - 12000 - 8000);
+  assert.match(cash.note, /2026-11-04 00:00 設定的現金，加上銀行提款 1 筆，手動記帳 2 筆/);
+  const at = d => cashAt(d, { bankRows, manual, settings });
+  assert.equal(at('2026-11-04'), 300000);
+  assert.equal(at('2026-11-05'), 300000 + 100000 - 12000);
+  assert.equal(at('2026-11-07'), 300000 + 100000 - 12000 - 8000);
+  // Backwards: before 11/02 the 500 had not been spent yet.
+  assert.equal(at('2026-11-02'), 300000 + 50000);
+  // Before 11/01 the 2,000 had not been withdrawn yet; 10/31's income is still to come.
+  assert.equal(at('2026-11-01'), 300000 + 50000 - 200000);
+  assert.equal(at('2026-10-31'), 300000 + 50000 - 200000 - 10000);
+  assert.equal(cashAt('2026-11-01', { manual }), null);
 });
