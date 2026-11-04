@@ -196,3 +196,36 @@ test('cash is set as of 00:00 on the day: that day counts forwards, earlier days
   assert.equal(at('2026-10-31'), 300000 + 50000 - 200000 - 10000);
   assert.equal(cashAt('2026-11-01', { manual }), null);
 });
+
+test('fixed items and budgets round-trip through the sheet; due months are written once', async () => {
+  const { recurringItem, recurringRow, dueEntries } = await import('../cloud/recurring.mjs');
+  const { budgetRow } = await import('../cloud/budget.mjs');
+  const tables = { 匯入紀錄: [IMPORT_HEADERS] };
+  const store = sheetsApi(tables);
+  await store.metadata();
+  const item = recurringItem({
+    id: 'r1',
+    name: '房租',
+    type: '支出',
+    amount: '12000',
+    method: '現金',
+    category: '居家／房租',
+    day: 1,
+    start: '2026-10'
+  });
+  await store.saveRecurring([recurringRow(item)]);
+  await store.saveBudgets([budgetRow('總預算', 2000000)]);
+  let r = await store.summary();
+  assert.deepEqual(
+    r.recurring.map(i => i.name),
+    ['房租']
+  );
+  assert.equal(r.budgets.get('總預算'), 2000000);
+  const due = dueEntries(r.recurring, r.manualIds, '2026-11-04');
+  assert.equal(due.length, 2);
+  await store.saveManual(due.map(e => manualRow(e)));
+  r = await store.summary();
+  assert.equal(dueEntries(r.recurring, r.manualIds, '2026-11-04').length, 0);
+  const h = r.history.rows.find(x => x.id === 'rec-r1-2026-11');
+  assert.equal(h.category, '居家／房租');
+});

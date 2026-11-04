@@ -6,6 +6,10 @@ import { renderAssets } from '../web/assets.mjs';
 import { renderMatching, clearMatching } from '../web/matching.mjs';
 import { setCardAccounts } from '../web/cards.mjs';
 import { renderManual } from '../web/manual.mjs';
+import { renderRecurring } from '../web/recurring.mjs';
+import { renderReports } from '../web/reports.mjs';
+import { dueEntries, localToday } from './recurring.mjs';
+import { manualRow } from './manual.mjs';
 import { renderAccounts, askCashIfNeeded } from '../web/accounts-view.mjs';
 import { makeStockImport } from './stocks.mjs';
 import { rememberedAccount, rememberAccount } from './login-preferences.mjs';
@@ -155,14 +159,33 @@ function clearSummary() {
   $('bankDepositDetail').textContent = '連接 Google 後載入各帳戶最後餘額。';
   $('cloudSheetLink').hidden = true;
 }
+// Monthly fixed items that came due since the last visit become hand entries, then the summary is read again.
+async function fillRecurring(result) {
+  let generated = [];
+  try {
+    const due = result.recurring?.length ? dueEntries(result.recurring, result.manualIds, localToday()) : [];
+    if (due.length) {
+      await store.saveManual(due.map(e => manualRow(e)));
+      generated = due;
+      result = await store.summary();
+    }
+  } catch (e) {
+    if (e.message === 'GOOGLE_LOGIN_REQUIRED') throw e;
+    result.history.warnings.push('固定收支自動記帳未完成，下次載入會再補上');
+  }
+  result.generated = generated;
+  return result;
+}
 async function summary() {
   await store.metadata();
-  const result = await store.summary();
+  const result = await fillRecurring(await store.summary());
   renderAssets(result);
   renderHistory(result.history);
   renderMatching(result.matching);
   renderManual(result.manual || [], result.balances?.names);
   renderAccounts(result.balances);
+  renderRecurring(result.recurring, result.balances?.names, result.generated);
+  renderReports(result.history.rows, result.budgets);
   askCashIfNeeded(result.balances);
   accountChoices?.update(result.accounts || {});
   setCardAccounts(result.cardAccounts || {}, true);
@@ -434,6 +457,34 @@ export function initCloud({ getPayload }) {
       controls();
       try {
         const saved = await store.saveAccountSetting(row);
+        await summary();
+        return saved;
+      } finally {
+        working = false;
+        controls();
+      }
+    },
+    saveRecurring: async rows => {
+      if (working) throw Error('SYNC_BUSY');
+      if (!store.connected) throw Error('GOOGLE_LOGIN_REQUIRED');
+      working = true;
+      controls();
+      try {
+        const saved = await store.saveRecurring(rows);
+        await summary();
+        return saved;
+      } finally {
+        working = false;
+        controls();
+      }
+    },
+    saveBudgets: async rows => {
+      if (working) throw Error('SYNC_BUSY');
+      if (!store.connected) throw Error('GOOGLE_LOGIN_REQUIRED');
+      working = true;
+      controls();
+      try {
+        const saved = await store.saveBudgets(rows);
         await summary();
         return saved;
       } finally {

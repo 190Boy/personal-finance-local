@@ -23,6 +23,8 @@ import { MANUAL_HEADERS, manualTable, manualSheetRows, manualEntries, manualHist
 import { mergeStockTables } from './stock-layout.mjs';
 import { ledgerPlan, migrationId } from './ledger.mjs';
 import { cloudHistory } from './history.mjs';
+import { RECURRING_HEADERS, recurringTable } from './recurring.mjs';
+import { BUDGET_HEADERS, budgetTable } from './budget.mjs';
 import { STOCK_SCHEMAS, stockSummary } from './stocks.mjs';
 import { savedAccounts } from './accounts.mjs';
 import { HEADERS, IMPORT_HEADERS, BANK_TABS, bankSummary } from './records.mjs';
@@ -313,6 +315,7 @@ export class GoogleStore {
     }
     let matching = null,
       manual = [],
+      manualIds = new Set(),
       decisionRows = [];
     try {
       decisionRows = await this.read('配對紀錄');
@@ -321,7 +324,10 @@ export class GoogleStore {
       warnings.push('配對紀錄讀取未完成：' + readReason(e));
     }
     try {
-      manual = manualEntries(manualTable(await this.read('手動記帳')));
+      const manualRows = manualTable(await this.read('手動記帳'));
+      // Every record ID ever written, deleted ones included, so a deleted monthly entry is not recreated.
+      manualIds = new Set(manualRows.map(r => String(r[0])));
+      manual = manualEntries(manualRows);
     } catch (e) {
       if (e.message === 'GOOGLE_LOGIN_REQUIRED') throw e;
       warnings.push('手動記帳讀取未完成：' + readReason(e));
@@ -428,9 +434,26 @@ export class GoogleStore {
     } catch (e) {
       warnings.push('分類未完成：' + readReason(e));
     }
+    let recurring = null,
+      budgets = new Map();
+    try {
+      recurring = recurringTable(await this.read('固定收支'));
+    } catch (e) {
+      if (e.message === 'GOOGLE_LOGIN_REQUIRED') throw e;
+      warnings.push('固定收支讀取未完成：' + readReason(e));
+    }
+    try {
+      budgets = budgetTable(await this.read('預算'));
+    } catch (e) {
+      if (e.message === 'GOOGLE_LOGIN_REQUIRED') throw e;
+      warnings.push('預算讀取未完成：' + readReason(e));
+    }
     return {
       ...bankSummary(rows),
       accounts: savedAccounts(rows),
+      recurring,
+      manualIds,
+      budgets,
       cardAccounts: savedAccounts(cardRowsForMatching.map(r => ['', r[3], r[4]])),
       stocks,
       credits,
@@ -979,5 +1002,38 @@ export class GoogleStore {
     } finally {
       this.saving = false;
     }
+  }
+  // Append rows to one append-only sheet, creating it with its headers the first time.
+  async appendRows(title, headers, rows) {
+    if (this.saving) throw Error('SYNC_BUSY');
+    if (!rows.length) return { added: 0 };
+    this.saving = true;
+    try {
+      await this.unifiedLog();
+      return await this.coordinated(async revision => {
+        const sheet = await this.ensure(title, headers),
+          epoch = this.epoch,
+          fileId = this.file?.id;
+        if (epoch !== this.epoch || fileId !== this.file?.id) throw Error('GOOGLE_LOGIN_REQUIRED');
+        await this.api(SHEETS + '/' + fileId + ':batchUpdate', {
+          method: 'POST',
+          body: {
+            requests: [
+              ...this.revisionRequests(revision),
+              { appendCells: { sheetId: sheet.sheetId, rows: cells(rows), fields: 'userEnteredValue' } }
+            ]
+          }
+        });
+        return { added: rows.length };
+      });
+    } finally {
+      this.saving = false;
+    }
+  }
+  saveRecurring(rows) {
+    return this.appendRows('固定收支', RECURRING_HEADERS, rows);
+  }
+  saveBudgets(rows) {
+    return this.appendRows('預算', BUDGET_HEADERS, rows);
   }
 }
