@@ -2152,3 +2152,79 @@ a {
 [tabindex='-1']:focus {
   outline: none;
 }
+
+/* v0.16.1: collapsible keypad + symmetric form layout */
+.entry-top {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.amount-box input {
+  text-align: right;
+}
+.keypad-toggle {
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0;
+  font-size: 18px;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.keypad-toggle[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.keypad[hidden] {
+  display: none;
+}
+/* Arrow columns stay equal on both sides; the middle never pushes them out. */
+.month-step,
+.date-step {
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+}
+.icon-btn {
+  width: 36px;
+  justify-self: center;
+}
+.field-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.field-row:has(.narrow) {
+  grid-template-columns: minmax(0, 1fr) 112px;
+}
+.field-row label.narrow {
+  max-width: none;
+}
+/* iOS gives date/time inputs and selects their own width and height;
+   reset them so every box in a row lines up. */
+input[type='date'],
+input[type='time'],
+input[type='month'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+}
+input[type='date']::-webkit-date-and-time-value,
+input[type='time']::-webkit-date-and-time-value,
+input[type='month']::-webkit-date-and-time-value {
+  text-align: inherit;
+  margin: 0;
+}
+.date-step input {
+  text-align: center;
+}
+.manual-form input:not([type='checkbox']):not([type='radio']),
+.manual-form select,
+.form-grid input:not([type='checkbox']):not([type='radio']),
+.form-grid select,
+.month-step select {
+  height: 40px;
+  min-height: 40px;
+  line-height: 24px;
+}
+.manual-form #manualAmount {
+  height: 52px;
+  min-height: 52px;
+  line-height: normal;
+}
