@@ -6,6 +6,7 @@ import { renderAssets } from '../web/assets.mjs';
 import { renderMatching, clearMatching } from '../web/matching.mjs';
 import { setCardAccounts } from '../web/cards.mjs';
 import { renderManual } from '../web/manual.mjs';
+import { renderAccounts } from '../web/accounts-view.mjs';
 import { makeStockImport } from './stocks.mjs';
 import { rememberedAccount, rememberAccount } from './login-preferences.mjs';
 import { initAccounts } from './accounts.mjs';
@@ -149,6 +150,7 @@ function clearSummary() {
   clearHistory();
   clearMatching();
   renderManual(null);
+  renderAccounts(null);
   $('bankDeposit').textContent = '尚未同步';
   $('bankDepositDetail').textContent = '連接 Google 後載入各帳戶最後餘額。';
   $('cloudSheetLink').hidden = true;
@@ -159,7 +161,8 @@ async function summary() {
   renderAssets(result);
   renderHistory(result.history);
   renderMatching(result.matching);
-  renderManual(result.manual || []);
+  renderManual(result.manual || [], result.balances?.names);
+  renderAccounts(result.balances);
   accountChoices?.update(result.accounts || {});
   setCardAccounts(result.cardAccounts || {}, true);
   $('bankDeposit').textContent = result.balances.length
@@ -416,6 +419,20 @@ export function initCloud({ getPayload }) {
       controls();
       try {
         const saved = await store.saveDecisions(rows);
+        await summary();
+        return saved;
+      } finally {
+        working = false;
+        controls();
+      }
+    },
+    saveAccountSetting: async row => {
+      if (working) throw Error('SYNC_BUSY');
+      if (!store.connected) throw Error('GOOGLE_LOGIN_REQUIRED');
+      working = true;
+      controls();
+      try {
+        const saved = await store.saveAccountSetting(row);
         await summary();
         return saved;
       } finally {

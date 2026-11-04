@@ -15,7 +15,7 @@ export const MANUAL_HEADERS = [
   '狀態',
   '更新時間'
 ];
-export const MANUAL_TYPES = ['支出', '收入'];
+export const MANUAL_TYPES = ['支出', '收入', '轉帳'];
 export const MANUAL_CATEGORIES = [
   '餐飲',
   '交通',
@@ -60,6 +60,8 @@ export function manualEntry(input) {
   if (entry.time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(entry.time)) throw Error('MANUAL_TIME');
   if (!Number.isSafeInteger(amountCents) || amountCents <= 0) throw Error('MANUAL_AMOUNT');
   if (!entry.method) throw Error('MANUAL_METHOD');
+  // A transfer moves money between two of the user's own accounts; the destination is kept in 對象／商店.
+  if (entry.type === '轉帳' && (!entry.party || entry.party === entry.method)) throw Error('MANUAL_TRANSFER');
   return entry;
 }
 export function manualRow(entry, { deleted = false, at = new Date().toISOString() } = {}) {
@@ -137,12 +139,18 @@ export function manualHistoryRow(e, n) {
     date: e.date,
     time: e.time,
     code: '',
-    summary: [e.party, e.category].filter(Boolean).join('／') || e.type,
-    expense: e.type === '支出' ? e.amountCents / 100 : null,
+    summary:
+      e.type === '轉帳'
+        ? '轉帳：' + e.method + ' → ' + e.party
+        : [e.party, e.category].filter(Boolean).join('／') || e.type,
+    // A transfer is shown on the paying account; its 內部轉帳 category keeps it out of totals.
+    expense: e.type !== '收入' ? e.amountCents / 100 : null,
     income: e.type === '收入' ? e.amountCents / 100 : null,
     fee: null,
     balance: null,
     review: e.note || '手動記帳',
+    // The category chosen when recording; without it the history would fall back to the keyword rules.
+    category: e.category,
     conflict: false,
     ordinal: n,
     financial: 'manual:' + e.id
