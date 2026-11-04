@@ -940,7 +940,7 @@ footer {
 
 .type-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 0;
   border: 1px solid #c9d8e8;
   border-radius: 12px;
@@ -1041,4 +1041,22 @@ footer {
   .category-grid {
     grid-template-columns: repeat(4, 1fr);
   }
+}
+
+.account-card .amount.negative {
+  color: #a3412f;
+}
+.account-setup {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-top: 8px;
+}
+.account-setup button {
+  min-height: 40px;
+  padding: 6px 14px;
+}
+
+.account-setup input[inputmode='decimal'] {
+  grid-column: 1 / -1;
 }

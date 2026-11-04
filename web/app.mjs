@@ -4,6 +4,7 @@ import { initMatching } from './matching.mjs';
 import { initLinePay } from './linepay.mjs';
 import { initManual } from './manual.mjs';
 import { setHistoryCloud } from './history.mjs';
+import { initAccountsView } from './accounts-view.mjs';
 import { initStocks } from './stocks.mjs';
 import { initCloud } from '../cloud/ui.mjs';
 import { inspectTable, parseEsunTable, TABLE_FIELDS } from '../pdf-parser/tabular.mjs';
@@ -95,6 +96,7 @@ const routes = [
   'linepay',
   'matching',
   'manual',
+  'accounts',
   'settings'
 ];
 function updateRoute(focus = false) {
@@ -111,7 +113,9 @@ function updateRoute(focus = false) {
         ? 'import'
         : ['matching', 'manual'].includes(route)
           ? 'transactions'
-          : route)
+          : route === 'accounts'
+            ? 'home'
+            : route)
     )
       link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
@@ -696,3 +700,4 @@ initMatching(cloud);
 initLinePay(cloud);
 initManual(cloud);
 setHistoryCloud(cloud);
+initAccountsView(cloud);

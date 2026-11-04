@@ -1,5 +1,6 @@
 import { manualEntry, manualRow } from '../cloud/manual.mjs';
 import { CATEGORY_TREE, iconOf, normalizeCategory, mainOf } from '../cloud/categories.mjs';
+import { transferCategory, resolveAccount } from '../cloud/balances.mjs';
 import { decisionRow, PAYMENT_METHODS } from '../cloud/matching.mjs';
 import { hash } from '../cloud/records.mjs';
 const $ = id => document.getElementById(id);
@@ -11,6 +12,7 @@ const messages = {
   MANUAL_METHOD: '請選擇付款方式。',
   MANUAL_EXPRESSION: '金額算式看不懂，只支援數字與 + −。',
   MANUAL_CATEGORY: '請選一個分類。',
+  MANUAL_TRANSFER: '轉帳要選不同的轉出與轉入帳戶。',
   MANUAL_AMOUNT_SHEET: '「手動記帳」工作表的金額無法辨識。',
   GOOGLE_LOGIN_REQUIRED: '請先連接 Google，再回來記帳。',
   SYNC_BUSY: '其他同步正在進行，請稍後重試。',
@@ -28,6 +30,7 @@ const today = () => {
   );
 };
 let cloud = null,
+  accountList = [],
   entries = null,
   editing = null,
   gapId = '',
@@ -50,8 +53,25 @@ export function evaluateAmount(text) {
     .replace(/\.00$/, '')
     .replace(/(\.\d)0$/, '$1');
 }
+function setAccountOptions(names) {
+  const list = [...new Set([...(names?.length ? names : PAYMENT_METHODS.filter(m => m !== '其他')), '其他'])];
+  for (const id of ['manualMethod', 'manualTo']) {
+    const select = $(id),
+      keep = select.value;
+    select.replaceChildren(
+      ...list.filter(n => id === 'manualMethod' || n !== '其他').map(n => new Option(n, n))
+    );
+    if (list.includes(keep)) select.value = keep;
+  }
+  accountList = list;
+}
 function setType(type) {
   $('manualType').value = type;
+  const transfer = type === '轉帳';
+  $('manualCategoryBlock').hidden = transfer;
+  $('manualToLabel').hidden = !transfer;
+  $('manualPartyLabel').hidden = transfer;
+  $('manualMethodLabel').textContent = transfer ? '轉出帳戶' : '付款方式／帳戶';
   for (const b of document.querySelectorAll('.type-tab'))
     b.setAttribute('aria-selected', String(b.dataset.type === type));
   drawCategories();
@@ -122,7 +142,11 @@ function fill(values = {}) {
   $('manualDate').value = values.date || today();
   $('manualTime').value = values.time || '';
   $('manualAmount').value = values.amountCents ? String(values.amountCents / 100) : values.amount || '';
-  $('manualMethod').value = values.method || '現金';
+  const method = resolveAccount(values.method || '現金', accountList);
+  if (![...$('manualMethod').options].some(o => o.value === method))
+    $('manualMethod').append(new Option(method, method));
+  $('manualMethod').value = method;
+  if (values.type === '轉帳') $('manualTo').value = resolveAccount(values.party, accountList);
   $('manualParty').value = values.party || '';
   setCategory(normalizeCategory(values.category, values.type || '支出'));
   $('manualNote').value = values.note || '';
@@ -233,13 +257,14 @@ function draw() {
   controls();
 }
 
-export function renderManual(list) {
+export function renderManual(list, names) {
   entries = list;
+  if ($('manualMethod')) setAccountOptions(names);
   if ($('manualList')) draw();
 }
 export function initManual(api) {
   cloud = api;
-  for (const m of PAYMENT_METHODS) $('manualMethod').append(new Option(m, m));
+  setAccountOptions(null);
   keypad();
   for (const b of document.querySelectorAll('.type-tab'))
     b.addEventListener('click', () => {
@@ -253,6 +278,8 @@ export function initManual(api) {
     let entry;
     try {
       $('manualAmount').value = evaluateAmount($('manualAmount').value);
+      const transfer = $('manualType').value === '轉帳';
+      if (transfer) setCategory(transferCategory($('manualTo').value));
       if (!$('manualCategory').value) throw Error('MANUAL_CATEGORY');
       entry = manualEntry({
         id: editing?.id || crypto.randomUUID(),
@@ -261,7 +288,7 @@ export function initManual(api) {
         time: $('manualTime').value,
         amount: $('manualAmount').value,
         method: $('manualMethod').value,
-        party: $('manualParty').value,
+        party: transfer ? $('manualTo').value : $('manualParty').value,
         category: $('manualCategory').value,
         note: $('manualNote').value
       });

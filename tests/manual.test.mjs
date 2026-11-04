@@ -189,3 +189,14 @@ test('recording a wallet transfer explains its gap and appears once in the histo
   );
   assert.ok(DECISION_HEADERS.length);
 });
+
+test('the category chosen when recording reaches the history row', async () => {
+  const { manualHistoryRow } = await import('../cloud/manual.mjs');
+  const { categorize } = await import('../cloud/categories.mjs');
+  const row = manualHistoryRow(
+    manualEntries([manualRow(manualEntry({ ...base, category: '餐飲／晚餐' }))])[0],
+    0
+  );
+  categorize([row]);
+  assert.deepEqual([row.category, row.categorySource], ['餐飲／晚餐', '手動記帳']);
+});

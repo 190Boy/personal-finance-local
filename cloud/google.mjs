@@ -18,6 +18,7 @@ import {
   walletGaps
 } from './linepay.mjs';
 import { categorize, categoryOverrides, recordKeyOf } from './categories.mjs';
+import { ACCOUNT_SETTINGS_HEADERS, settingsTable, computeBalances } from './balances.mjs';
 import { MANUAL_HEADERS, manualTable, manualSheetRows, manualEntries, manualHistoryRow } from './manual.mjs';
 import { mergeStockTables } from './stock-layout.mjs';
 import { ledgerPlan, migrationId } from './ledger.mjs';
@@ -408,6 +409,20 @@ export class GoogleStore {
       );
     }
     for (const h of history.rows) h.recordKey = recordKeyOf(h);
+    let balances = null;
+    try {
+      balances = computeBalances({
+        bankBalances: bankSummary(rows).balances,
+        bankRows: rows,
+        credits,
+        wallet: matching?.wallet,
+        manual,
+        settings: settingsTable(await this.read('帳戶設定'))
+      });
+    } catch (e) {
+      if (e.message === 'GOOGLE_LOGIN_REQUIRED') throw e;
+      warnings.push('帳戶餘額計算未完成：' + readReason(e));
+    }
     try {
       categorize(history.rows, categoryOverrides(decisionRows));
     } catch (e) {
@@ -421,6 +436,7 @@ export class GoogleStore {
       credits,
       matching,
       manual,
+      balances,
       history: { ...history, warnings }
     };
   }
@@ -933,6 +949,32 @@ export class GoogleStore {
           throw e;
         }
         return { added: rows.length };
+      });
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  async saveAccountSetting(row) {
+    if (this.saving) throw Error('SYNC_BUSY');
+    this.saving = true;
+    try {
+      await this.unifiedLog();
+      return await this.coordinated(async revision => {
+        const sheet = await this.ensure('帳戶設定', ACCOUNT_SETTINGS_HEADERS),
+          epoch = this.epoch,
+          fileId = this.file?.id;
+        if (epoch !== this.epoch || fileId !== this.file?.id) throw Error('GOOGLE_LOGIN_REQUIRED');
+        await this.api(SHEETS + '/' + fileId + ':batchUpdate', {
+          method: 'POST',
+          body: {
+            requests: [
+              ...this.revisionRequests(revision),
+              { appendCells: { sheetId: sheet.sheetId, rows: cells([row]), fields: 'userEnteredValue' } }
+            ]
+          }
+        });
+        return { added: 1 };
       });
     } finally {
       this.saving = false;
