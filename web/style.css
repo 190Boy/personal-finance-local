@@ -1083,3 +1083,152 @@ footer {
 .nowrap {
   white-space: nowrap;
 }
+
+.recurring-form .actions {
+  grid-column: 1 / -1;
+}
+.report-donut {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) 1fr;
+  gap: 16px;
+  align-items: center;
+}
+.report-donut svg {
+  width: 100%;
+  height: auto;
+}
+.report-donut .slice {
+  cursor: pointer;
+}
+.report-donut .slice:hover {
+  opacity: 0.85;
+}
+.donut-label {
+  font-size: 12px;
+  fill: #5d6b7c;
+}
+.donut-value {
+  font-size: 20px;
+  font-weight: 700;
+  fill: #18334e;
+}
+.report-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.report-legend button {
+  display: grid;
+  grid-template-columns: 12px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 6px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid #eef2f7;
+  border-radius: 0;
+  color: #18334e;
+  font-weight: 400;
+  text-align: left;
+}
+.report-legend button:hover {
+  background: #f4f7fb;
+}
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.report-key {
+  display: flex;
+  gap: 6px 14px;
+  align-items: center;
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.report-key .swatch {
+  margin-right: -8px;
+}
+.report-trend svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.report-trend .grid {
+  stroke: #e6ebf2;
+  stroke-width: 1;
+}
+.report-trend .axis {
+  stroke: #b8c3d1;
+  stroke-width: 1;
+}
+.report-trend .tick {
+  font-size: 11px;
+  fill: #5d6b7c;
+}
+.report-trend .hit {
+  fill: transparent;
+}
+.report-trend .hit:hover {
+  fill: #18334e0a;
+}
+.report-trend table {
+  width: 100%;
+  font-size: 13px;
+}
+.report-trend td,
+.report-trend th {
+  text-align: right;
+  padding: 4px 6px;
+}
+.report-trend td:first-child,
+.report-trend th:first-child {
+  text-align: left;
+}
+.budget-row {
+  margin: 0 0 14px;
+}
+.budget-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.budget-track {
+  height: 10px;
+  border-radius: 5px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+.budget-fill {
+  height: 100%;
+  border-radius: 5px;
+  background: #2a78d6;
+}
+.budget-row.near .budget-fill {
+  background: #eda100;
+}
+.budget-row.over .budget-fill {
+  background: #e34948;
+}
+.budget-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.budget-form button {
+  grid-column: 1 / -1;
+}
+@media (max-width: 520px) {
+  .report-donut {
+    grid-template-columns: 1fr;
+  }
+  .report-donut svg {
+    max-width: 200px;
+    margin: 0 auto;
+  }
+}

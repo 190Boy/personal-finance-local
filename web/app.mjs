@@ -5,6 +5,8 @@ import { initLinePay } from './linepay.mjs';
 import { initManual } from './manual.mjs';
 import { setHistoryCloud } from './history.mjs';
 import { initAccountsView } from './accounts-view.mjs';
+import { initRecurring } from './recurring.mjs';
+import { initReports } from './reports.mjs';
 import { initStocks } from './stocks.mjs';
 import { initCloud } from '../cloud/ui.mjs';
 import { inspectTable, parseEsunTable, TABLE_FIELDS } from '../pdf-parser/tabular.mjs';
@@ -97,6 +99,8 @@ const routes = [
   'matching',
   'manual',
   'accounts',
+  'recurring',
+  'reports',
   'settings'
 ];
 function updateRoute(focus = false) {
@@ -111,9 +115,9 @@ function updateRoute(focus = false) {
       link.dataset.nav ===
       (['stocks', 'bank-import', 'cards', 'invoices', 'linepay'].includes(route)
         ? 'import'
-        : ['matching', 'manual'].includes(route)
+        : ['matching', 'manual', 'recurring'].includes(route)
           ? 'transactions'
-          : route === 'accounts'
+          : ['accounts', 'reports'].includes(route)
             ? 'home'
             : route)
     )
@@ -701,3 +705,5 @@ initLinePay(cloud);
 initManual(cloud);
 setHistoryCloud(cloud);
 initAccountsView(cloud);
+initRecurring(cloud);
+initReports(cloud);
