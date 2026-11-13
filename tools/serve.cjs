@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const PORT = Number(process.env.PORT) || 4173;
-const PUBLIC = [/^index\.html$/, /^sw\.js$/, /^(web|pdf-parser|cloud)\/[^]+$/];
+const PUBLIC = [/^index\.html$/, /^sw\.js$/, /^(web|cloud)\/[^]+$/];
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',

@@ -49,10 +49,10 @@ test('bypassed requests are not intercepted', () => {
 });
 test('allowlist contains no sensitive formats, APIs or user data stores', () => {
   const files = vm.runInContext('FILES', context);
-  assert.ok(files.length > 150);
+  assert.ok(files.length > 10);
   assert.ok(files.includes('web/manifest.webmanifest'));
-  assert.ok(files.includes('cloud/dedup.mjs'));
-  assert.ok(files.includes('cloud/stock-layout.mjs'));
+  assert.ok(files.includes('cloud/cash.mjs'));
+  assert.ok(files.includes('cloud/cash-store.mjs'));
   assert.ok(files.includes('web/icons/icon-180.png'));
   assert.ok(
     !files.some(f => /\.pdf$|\.csv$|oauth|transactions|legacy-gas|source-wallet|test-results/i.test(f))
@@ -62,10 +62,10 @@ test('allowlist contains no sensitive formats, APIs or user data stores', () => 
 });
 
 test('known client routes work offline without caching arbitrary OAuth fragments', () => {
-  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#transactions'), true);
-  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#stocks'), true);
-  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#cards'), true);
-  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#bank-import'), true);
+  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#home'), true);
+  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#add'), true);
+  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#settings'), true);
+  assert.equal(accepts('https://example.github.io/personal-finance-local/web/#transactions'), false);
   assert.equal(
     accepts('https://example.github.io/personal-finance-local/web/#access_token=synthetic'),
     false

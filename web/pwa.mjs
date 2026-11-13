@@ -1,4 +1,4 @@
-// This module never receives PDF bytes, passwords, transaction objects or OAuth credentials.
+// This module never receives records or OAuth credentials.
 const statusNode = document.getElementById('pwaStatus');
 const installButton = document.getElementById('installApp');
 let promptEvent = null;
@@ -47,11 +47,11 @@ export async function initPwa() {
     });
     const ready = () => {
       if (registration.waiting) {
-        show('有新版程式待啟用。先清除預覽，再關閉所有本 App 視窗並重新開啟。');
+        show('有新版程式待啟用：關閉所有本 App 視窗後重新開啟。');
         return;
       }
       if (registration.active)
-        show((standalone() ? '主畫面模式 · ' : '') + '公開程式資源已備妥；PDF 與交易資料不在離線快取中。');
+        show((standalone() ? '主畫面模式 · ' : '') + '程式已可離線開啟；記帳存在這台裝置，連上網路再同步。');
       else if (registration.installing?.state === 'redundant')
         show('離線資源尚未準備成功。請保持連線、確認儲存空間後重新開啟。');
       else show('正在準備公開程式資源；請保持連線至完成。');
