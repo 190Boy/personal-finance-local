@@ -1,5 +1,15 @@
 // 現金記帳：記帳先存在這台裝置，連上 Google 後同步到你自己的「現金記帳」試算表。
-import { makeEntry, ledger, cashNow, monthSummary, parseCents } from '../cloud/cash.mjs';
+import {
+  makeEntry,
+  ledger,
+  cashNow,
+  monthSummary,
+  parseCents,
+  makeOption,
+  channelList,
+  categoryTree,
+  CASH
+} from '../cloud/cash.mjs';
 import { CashLocal } from '../cloud/cash-local.mjs';
 import { CashStore, SCOPE } from '../cloud/cash-store.mjs';
 import { loadGis, requestToken } from '../cloud/auth.mjs';
@@ -25,6 +35,7 @@ let remembered = rememberedAccount(storage),
   lastError = '',
   editing = null,
   month = '',
+  filter = '',
   askedCash = false;
 
 const messages = {
@@ -32,6 +43,8 @@ const messages = {
   CASH_TIME: '時間格式不正確，可以留空。',
   CASH_AMOUNT: '請填寫大於 0 的金額，最多到小數點後兩位。',
   CASH_CATEGORY: '請選一個分類。',
+  CASH_CHANNEL: '請選擇渠道。',
+  OPTION_NAME: '請填寫名稱。',
   CASH_EXPRESSION: '金額算式看不懂，只支援數字與 + −。',
   GOOGLE_NETWORK: '連不上 Google，記帳已先存在這台裝置，有網路時再同步。',
   GOOGLE_PERMISSION: 'Google 沒有給予存取權限，請重新連接並允許存取。',
@@ -60,6 +73,34 @@ const shiftMonth = (m, by) => {
   return y + '-' + pad(mm);
 };
 const signedYuan = c => (c < 0 ? '−' : '') + yuan(Math.abs(c));
+const treeOf = t =>
+  categoryTree(
+    t === '收入' ? CATEGORY_TREE.收入 : CATEGORY_TREE.支出,
+    local.options,
+    t === '收入' ? '收入' : '支出'
+  );
+// Your own main categories carry their own icon.
+function iconFor(category, t = '支出') {
+  const main = String(category || '').split('／')[0];
+  const own =
+    treeOf(t).find(c => c.name === main && c.own) ||
+    treeOf(t === '收入' ? '支出' : '收入').find(c => c.name === main && c.own);
+  return own ? own.icon : iconOf(category);
+}
+function chips(box, values, current, onPick, extra) {
+  box.replaceChildren();
+  for (const [value, label] of values) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(value === current));
+    b.textContent = label;
+    b.addEventListener('click', () => onPick(value));
+    box.append(b);
+  }
+  if (extra) box.append(extra);
+}
 
 // ---------- Home ----------
 function drawHome() {
@@ -72,15 +113,23 @@ function drawHome() {
     ? '從 ' + setting.date.replaceAll('-', '/') + ' 00:00 的 ' + yuan(setting.cents) + ' 起算'
     : '還沒設定起始現金';
   $('welcome').hidden = !!setting || store.connected || entries.length > 0;
-  const m = monthSummary(entries, month);
+  const used = new Set(entries.filter(e => !e.deleted && e.date.slice(0, 7) === month).map(e => e.channel));
+  if (filter && !used.has(filter)) filter = '';
+  const shown = channelList(local.options).filter(c => used.has(c));
+  for (const c of used) if (!shown.includes(c)) shown.push(c);
+  $('channelFilter').hidden = shown.length < 2 && !(shown.length === 1 && shown[0] !== CASH);
+  chips($('channelFilter'), [['', '全部'], ...shown.map(c => [c, c])], filter, value => {
+    filter = value;
+    drawHome();
+  });
+  const m = monthSummary(entries, month, filter);
   $('monthLabel').textContent = month.slice(0, 4) + ' 年 ' + +month.slice(5) + ' 月';
   const thisMonth = month === today().slice(0, 7);
   $('monthExpense').textContent = yuan(m.expenseCents);
   $('monthIncome').textContent = yuan(m.incomeCents);
-  $('monthExpense').previousElementSibling.textContent =
-    (thisMonth ? '本月' : +month.slice(5) + ' 月') + '支出';
-  $('monthIncome').previousElementSibling.textContent =
-    (thisMonth ? '本月' : +month.slice(5) + ' 月') + '收入';
+  const when = (thisMonth ? '本月' : +month.slice(5) + ' 月') + (filter ? ' ' + filter : '');
+  $('monthExpense').previousElementSibling.textContent = when + '支出';
+  $('monthIncome').previousElementSibling.textContent = when + '收入';
   // Spending by category as one thin stacked bar with labels underneath.
   const box = $('monthBreakdown');
   box.replaceChildren();
@@ -98,7 +147,7 @@ function drawHome() {
       const item = document.createElement('span');
       const dot = document.createElement('i');
       dot.style.background = seg.style.background;
-      item.append(dot, iconOf(c.name) + ' ' + c.name + ' ' + yuan(c.cents));
+      item.append(dot, iconFor(c.name) + ' ' + c.name + ' ' + yuan(c.cents));
       legend.append(item);
     }
     const extra = [];
@@ -113,7 +162,7 @@ function drawHome() {
     box.append(bar, legend);
   }
   const rows = ledger(entries, setting)
-    .filter(e => e.date.slice(0, 7) === month)
+    .filter(e => e.date.slice(0, 7) === month && (!filter || e.channel === filter))
     .reverse();
   const list = $('entryList');
   list.replaceChildren();
@@ -122,22 +171,23 @@ function drawHome() {
   for (const g of groupByDay(
     rows,
     e => e.date,
-    e => (e.type === '支出' || e.type === '收入' ? e.flowCents : 0)
+    e => (e.type === '支出' || e.type === '收入' ? e.amountSigned : 0)
   )) {
     list.append(dayHeader(g.date, g.cents));
     for (const e of g.items) {
       const transfer = e.type === '提款' || e.type === '存入';
+      const cash = e.channel === CASH;
       list.append(
         row({
           category: transfer ? '' : e.category,
-          icon: e.type === '提款' ? '🏧' : e.type === '存入' ? '🏦' : undefined,
+          icon: e.type === '提款' ? '🏧' : e.type === '存入' ? '🏦' : iconFor(e.category, e.type),
           tint: transfer ? '#8b8f96' : undefined,
           title: transfer ? e.type + (e.party ? '　' + e.party : '') : e.category.split('／').pop(),
           sub:
             [transfer ? '' : e.party, e.note].filter(Boolean).join('－') ||
             (transfer ? '現金 ' + (e.type === '提款' ? '增加' : '減少') : ''),
-          cents: e.flowCents,
-          side: (pending.has(e.id) ? '⏳ ' : '') + '餘 ' + signedYuan(e.balanceCents),
+          cents: e.amountSigned,
+          side: (pending.has(e.id) ? '⏳ ' : '') + (cash ? '餘 ' + signedYuan(e.balanceCents) : e.channel),
           dim: transfer,
           onClick: () => openEditor(e)
         })
@@ -148,13 +198,39 @@ function drawHome() {
 
 // ---------- Entry form ----------
 let type = '支出',
-  category = '';
+  category = '',
+  channel = CASH,
+  adding = null; // { kind, parent } while the add box is open
+function drawChannels() {
+  const list = channelList(local.options);
+  if (!list.includes(channel)) list.push(channel);
+  const plus = document.createElement('button');
+  plus.type = 'button';
+  plus.className = 'chip add';
+  plus.textContent = '＋';
+  plus.setAttribute('aria-label', '新增渠道');
+  plus.addEventListener('click', () => openAdder({ kind: '渠道', parent: '' }));
+  chips(
+    $('channelRow'),
+    list.map(c => [c, c]),
+    channel,
+    value => {
+      channel = value;
+      local.state.lastChannel = value;
+      local.save();
+      drawChannels();
+    },
+    plus
+  );
+}
 function setType(t) {
   type = t;
   for (const b of document.querySelectorAll('.type-tab'))
     b.setAttribute('aria-selected', String(b.dataset.type === t));
   const transfer = t === '提款' || t === '存入';
   $('categoryButton').hidden = transfer;
+  $('channelRow').hidden = transfer;
+  closeAdder();
   $('partyLabel').textContent = transfer ? '銀行／帳戶' : '對象／商店';
   $('typeHint').hidden = !transfer;
   $('typeHint').textContent =
@@ -168,7 +244,7 @@ function setType(t) {
 }
 function setCategory(c) {
   category = c || '';
-  $('categoryIcon').textContent = category ? iconOf(category) : '＋';
+  $('categoryIcon').textContent = category ? iconFor(category, type) : '＋';
   $('categoryName').textContent = category ? category.replace('／', ' · ') : '選分類';
   drawCategories();
 }
@@ -177,7 +253,7 @@ function showPicker(open) {
   $('categoryButton').setAttribute('aria-expanded', String(open));
 }
 function drawCategories() {
-  const groups = type === '收入' ? CATEGORY_TREE.收入 : CATEGORY_TREE.支出;
+  const groups = treeOf(type);
   const grid = $('categoryGrid'),
     subs = $('subGrid');
   grid.replaceChildren();
@@ -194,6 +270,15 @@ function drawCategories() {
     b.addEventListener('click', () => setCategory(c.name));
     grid.append(b);
   }
+  const addMain = document.createElement('button');
+  addMain.type = 'button';
+  addMain.className = 'category-tile add';
+  const plus = document.createElement('span');
+  plus.className = 'icon';
+  plus.textContent = '＋';
+  addMain.append(plus, '新增');
+  addMain.addEventListener('click', () => openAdder({ kind: type + '分類', parent: '' }));
+  grid.append(addMain);
   const group = groups.find(c => c.name === main);
   if (group)
     for (const sub of group.subs) {
@@ -208,6 +293,58 @@ function drawCategories() {
       });
       subs.append(b);
     }
+  if (group) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sub-chip add';
+    b.textContent = '＋ 子分類';
+    b.addEventListener('click', () => openAdder({ kind: type + '分類', parent: group.name }));
+    subs.append(b);
+  }
+}
+// One small box for adding a channel, a main category or a sub-category.
+function openAdder(what) {
+  adding = what;
+  $('optionAdder').hidden = false;
+  $('optionIcon').hidden = !(what.kind !== '渠道' && !what.parent);
+  $('optionAdderLabel').textContent =
+    what.kind === '渠道'
+      ? '新增渠道'
+      : what.parent
+        ? '新增「' + what.parent + '」的子分類'
+        : '新增' + what.kind;
+  $('optionName').value = '';
+  $('optionIcon').value = '';
+  $('optionName').focus();
+}
+function closeAdder() {
+  adding = null;
+  $('optionAdder').hidden = true;
+}
+function addOption(input, statusId) {
+  let o;
+  try {
+    o = makeOption(input);
+  } catch (error) {
+    $(statusId).textContent = messages[error.message] || '名稱不正確。';
+    return null;
+  }
+  const exists =
+    o.kind === '渠道'
+      ? channelList(local.options).includes(o.name)
+      : o.parent
+        ? treeOf(type)
+            .find(c => c.name === o.parent)
+            ?.subs.includes(o.name)
+        : treeOf(o.kind.slice(0, 2)).some(c => c.name === o.name);
+  if (exists) {
+    $(statusId).textContent = '「' + o.name + '」已經有了。';
+    return null;
+  }
+  local.putOption(o);
+  queueSync();
+  drawSettings();
+  return o;
 }
 export function evaluateAmount(text) {
   const t = String(text).replace(/\s+/g, '').replace(/[−－]/g, '-').replace(/＋/g, '+').replace(/,/g, '');
@@ -244,6 +381,8 @@ function keypad() {
 }
 function fillForm(e = null) {
   editing = e;
+  channel = e?.channel || local.state.lastChannel || CASH;
+  drawChannels();
   setType(e?.type || '支出');
   setCategory(e?.category || '');
   showPicker(!e && type === '支出');
@@ -275,6 +414,7 @@ function saveForm(ev) {
       time: $('time').value,
       amount: $('amount').value,
       category,
+      channel,
       party: $('party').value,
       note: $('note').value,
       createdAt: editing?.createdAt || now,
@@ -286,7 +426,11 @@ function saveForm(ev) {
     return;
   }
   const saved = local.put(entry);
-  const label = (entry.category.split('／').pop() || entry.type) + ' ' + yuan(entry.amountCents);
+  const label =
+    (entry.channel === CASH ? '' : entry.channel + ' ') +
+    (entry.category.split('／').pop() || entry.type) +
+    ' ' +
+    yuan(entry.amountCents);
   const was = editing;
   fillForm();
   month = entry.date.slice(0, 7);
@@ -407,8 +551,13 @@ async function sync() {
   syncing = true;
   drawStatus();
   try {
-    const result = await store.sync(local.map, local.setting);
-    local.synced({ entries: result.entries, setting: result.setting, fileId: result.fileId });
+    const result = await store.sync(local.map, local.setting, local.options);
+    local.synced({
+      entries: result.entries,
+      setting: result.setting,
+      options: result.options,
+      fileId: result.fileId
+    });
     lastError = '';
   } catch (error) {
     lastError = messages[error.message] || '同步失敗，記帳已先存在這台裝置。';
@@ -444,9 +593,45 @@ function route() {
   if (known === 'settings') void loadGis().catch(() => {});
   window.scrollTo(0, 0);
 }
+// Your own channels and categories, each with a ✕ to remove it.
+function drawSettings() {
+  const box = $('ownOptions');
+  box.replaceChildren();
+  const live = [...local.options.values()].filter(o => !o.deleted);
+  const groups = [
+    ['渠道', live.filter(o => o.kind === '渠道')],
+    ['支出分類', live.filter(o => o.kind === '支出分類')],
+    ['收入分類', live.filter(o => o.kind === '收入分類')]
+  ];
+  for (const [title, list] of groups) {
+    if (!list.length) continue;
+    const h = document.createElement('h3');
+    h.textContent = '自己新增的' + title;
+    const wrap = document.createElement('div');
+    wrap.className = 'chip-row wrap';
+    for (const o of list.sort((a, b) => (a.parent + a.name).localeCompare(b.parent + b.name))) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip removable';
+      b.textContent = (o.icon ? o.icon + ' ' : '') + (o.parent ? o.parent + '／' : '') + o.name + ' ✕';
+      b.setAttribute('aria-label', '移除 ' + (o.parent ? o.parent + '／' : '') + o.name);
+      b.addEventListener('click', () => {
+        local.putOption({ ...o, deleted: true, updatedAt: new Date().toISOString() });
+        $('optionStatus').textContent = '已移除「' + o.name + '」。已經記下的帳不受影響。';
+        queueSync();
+        refresh();
+        drawChannels();
+        drawCategories();
+      });
+      wrap.append(b);
+    }
+    box.append(h, wrap);
+  }
+}
 function refresh() {
   drawHome();
   drawStatus();
+  drawSettings();
 }
 
 // ---------- Start ----------
@@ -460,6 +645,42 @@ function init() {
       showPicker(b.dataset.type === '支出' || b.dataset.type === '收入');
     });
   $('categoryButton').addEventListener('click', () => showPicker($('categoryPicker').hidden));
+  $('optionCancel').addEventListener('click', closeAdder);
+  const submitAdder = () => {
+    if (!adding) return;
+    const what = adding;
+    const o = addOption({ ...what, name: $('optionName').value, icon: $('optionIcon').value }, 'formStatus');
+    if (!o) return;
+    closeAdder();
+    $('formStatus').textContent = '已新增「' + o.name + '」。';
+    if (o.kind === '渠道') {
+      channel = o.name;
+      local.state.lastChannel = o.name;
+      local.save();
+      drawChannels();
+    } else if (o.parent) {
+      setCategory(o.parent + '／' + o.name);
+      showPicker(false);
+    } else {
+      setCategory(o.name);
+      showPicker(true);
+    }
+  };
+  $('optionAdd').addEventListener('click', submitAdder);
+  $('optionName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitAdder();
+    }
+  });
+  $('channelForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const o = addOption({ kind: '渠道', name: $('channelName').value }, 'optionStatus');
+    if (!o) return;
+    $('channelName').value = '';
+    $('optionStatus').textContent = '已新增渠道「' + o.name + '」。';
+    drawChannels();
+  });
   $('prevDay').addEventListener('click', () => ($('date').value = shiftDay($('date').value || today(), -1)));
   $('nextDay').addEventListener('click', () => ($('date').value = shiftDay($('date').value || today(), 1)));
   $('entryForm').addEventListener('submit', saveForm);

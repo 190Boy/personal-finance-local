@@ -1,9 +1,17 @@
 // 先存手機：每一筆記帳都先寫進這台裝置，連上 Google 時再同步到試算表。
-// 只存現金記帳本身與現金設定；Google 授權 Token 從不寫入這裡。
-import { makeEntry } from './cash.mjs';
+// 只存記帳、現金設定與自訂的渠道／分類；Google 授權 Token 從不寫入這裡。
+import { makeEntry, makeOption, optionKey } from './cash.mjs';
 
 export const LOCAL_KEY = 'cash-ledger-v1';
-const empty = () => ({ entries: [], setting: null, pending: [], fileId: '', lastSync: '' });
+const empty = () => ({
+  entries: [],
+  setting: null,
+  options: [],
+  pending: [],
+  pendingOptions: [],
+  fileId: '',
+  lastSync: ''
+});
 
 export class CashLocal {
   constructor(storage) {
@@ -17,6 +25,13 @@ export class CashLocal {
         this.state.entries = raw.entries.flatMap(e => {
           try {
             return [makeEntry(e)];
+          } catch {
+            return [];
+          }
+        });
+        this.state.options = (raw.options || []).flatMap(o => {
+          try {
+            return [makeOption(o)];
           } catch {
             return [];
           }
@@ -47,8 +62,18 @@ export class CashLocal {
   get setting() {
     return this.state.setting;
   }
+  get options() {
+    return new Map(this.state.options.map(o => [optionKey(o), o]));
+  }
   get pendingCount() {
-    return this.state.pending.length + (this.state.settingPending ? 1 : 0);
+    return this.state.pending.length + this.state.pendingOptions.length + (this.state.settingPending ? 1 : 0);
+  }
+  // Add or remove one of your own channels or categories.
+  putOption(option) {
+    const key = optionKey(option);
+    this.state.options = [...this.state.options.filter(o => optionKey(o) !== key), option];
+    if (!this.state.pendingOptions.includes(key)) this.state.pendingOptions.push(key);
+    return this.save();
   }
   // Save a new or edited record; it is marked to be uploaded.
   put(entry) {
@@ -68,7 +93,19 @@ export class CashLocal {
   }
   // After a successful sync. `entries` and `setting` are what the sheet now holds; anything changed on this
   // device while the sync was running is newer, so it is kept and stays pending for the next sync.
-  synced({ entries, setting, fileId, at = new Date().toISOString() }) {
+  synced({ entries, setting, options = new Map(), fileId, at = new Date().toISOString() }) {
+    const opts = new Map(options),
+      pendingOptions = [];
+    for (const o of this.state.options) {
+      const k = optionKey(o),
+        s = options.get(k);
+      if (!s || o.updatedAt > s.updatedAt) {
+        opts.set(k, o);
+        pendingOptions.push(k);
+      }
+    }
+    this.state.options = [...opts.values()];
+    this.state.pendingOptions = pendingOptions;
     const out = new Map(entries),
       pending = [];
     for (const e of this.state.entries) {

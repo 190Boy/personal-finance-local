@@ -4,6 +4,9 @@
 export const TYPES = ['支出', '收入', '提款', '存入'];
 // 提款：從銀行領現金，現金增加但不是收入；存入：把現金存回銀行，現金減少但不是支出。
 export const SIGN = { 支出: -1, 收入: 1, 提款: 1, 存入: -1 };
+// 渠道：錢從哪裡付、進到哪裡。只有「現金」會影響現金餘額；其他渠道是給 BOT 對帳用的參考紀錄。
+export const CASH = '現金';
+export const DEFAULT_CHANNELS = [CASH, '銀行', '信用卡', 'LINE Pay'];
 
 export const LOG_SHEET = '異動紀錄';
 export const LOG_HEADERS = [
@@ -17,15 +20,19 @@ export const LOG_HEADERS = [
   '備註',
   '狀態',
   '建立時間',
-  '更新時間'
+  '更新時間',
+  '渠道'
 ];
+// v1.0.0 sheets have no 渠道 column; they are read as cash and upgraded on the next sync.
+export const LOG_HEADERS_V1 = LOG_HEADERS.slice(0, 11);
 export const DETAIL_SHEET = '記帳明細';
 export const DETAIL_HEADERS = [
   '日期',
   '時間',
   '類型',
+  '渠道',
   '金額（元）',
-  '現金增減（元）',
+  '增減（元）',
   '主分類',
   '子分類',
   '對象／商店',
@@ -37,6 +44,7 @@ export const DETAIL_HEADERS = [
 export const MONTH_SHEET = '月份統計';
 export const MONTH_HEADERS = [
   '月份',
+  '渠道',
   '支出（元）',
   '收入（元）',
   '提款（元）',
@@ -46,6 +54,10 @@ export const MONTH_HEADERS = [
 ];
 export const SETTING_SHEET = '設定';
 export const SETTING_HEADERS = ['項目', '內容', '說明'];
+// 自己新增的渠道、分類、子分類。種類：渠道／支出分類／收入分類；子分類的「上層」填主分類名稱。
+export const OPTION_SHEET = '選項';
+export const OPTION_HEADERS = ['種類', '名稱', '上層', '圖示', '狀態', '更新時間'];
+export const OPTION_KINDS = ['渠道', '支出分類', '收入分類'];
 
 const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -73,6 +85,9 @@ export function makeEntry(input, now = new Date().toISOString()) {
     type: String(input.type || '支出'),
     amountCents: Number.isSafeInteger(input.amountCents) ? input.amountCents : parseCents(input.amount),
     category: String(input.category || '').trim(),
+    channel: String(input.channel || CASH)
+      .trim()
+      .slice(0, 20),
     party: String(input.party || '')
       .trim()
       .slice(0, 60),
@@ -90,10 +105,18 @@ export function makeEntry(input, now = new Date().toISOString()) {
   if (!Number.isSafeInteger(e.amountCents) || e.amountCents <= 0 || e.amountCents > 100000000000)
     throw Error('CASH_AMOUNT');
   if ((e.type === '支出' || e.type === '收入') && !e.category) throw Error('CASH_CATEGORY');
-  if (e.type === '提款' || e.type === '存入') e.category = '';
+  if (e.type === '提款' || e.type === '存入') {
+    e.category = '';
+    e.channel = CASH;
+  }
+  if (!e.channel) throw Error('CASH_CHANNEL');
   return e;
 }
-export const flowOf = e => (e.deleted ? 0 : SIGN[e.type] * e.amountCents);
+export const isCash = e => e.channel === CASH;
+// The record's money in (+) or out (−) on its own channel.
+export const amountOf = e => (e.deleted ? 0 : SIGN[e.type] * e.amountCents);
+// Only cash records move the cash balance.
+export const flowOf = e => (isCash(e) ? amountOf(e) : 0);
 const order = (a, b) =>
   a.date.localeCompare(b.date) ||
   (a.time || '').localeCompare(b.time || '') ||
@@ -142,12 +165,15 @@ export function logRow(e) {
     e.note,
     e.deleted ? '已刪除' : '有效',
     e.createdAt,
-    e.updatedAt
+    e.updatedAt,
+    e.channel
   ];
 }
 export function readLog(values) {
   if (!values.length) return [];
-  if (JSON.stringify(values[0]) !== JSON.stringify(LOG_HEADERS)) throw Error('SHEET_SCHEMA');
+  const head = JSON.stringify(values[0]);
+  if (head !== JSON.stringify(LOG_HEADERS) && head !== JSON.stringify(LOG_HEADERS_V1))
+    throw Error('SHEET_SCHEMA');
   const out = [];
   for (const r of values.slice(1)) {
     try {
@@ -163,7 +189,8 @@ export function readLog(values) {
           note: r[7],
           deleted: r[8] === '已刪除',
           createdAt: String(r[9] || ''),
-          updatedAt: String(r[10] || '')
+          updatedAt: String(r[10] || ''),
+          channel: String(r[11] || CASH)
         })
       );
     } catch {
@@ -173,21 +200,25 @@ export function readLog(values) {
   return out;
 }
 
-// Every live record in time order with the cash left after it. The counted amount is the cash at 00:00 on
-// the setting's day: records from that day on add up from it, earlier records are worked out backwards.
+// Every live record in time order. Cash records carry the cash left after them; other channels get null.
+// The counted amount is the cash at 00:00 on the setting's day: cash records from that day on add up from it,
+// earlier ones are worked out backwards.
 export function ledger(entries, setting) {
-  const list = [...entries].filter(e => !e.deleted).sort(order);
+  const out = [...entries]
+    .filter(e => !e.deleted)
+    .sort(order)
+    .map(e => ({ ...e, amountSigned: amountOf(e), flowCents: flowOf(e), balanceCents: null }));
+  const cash = out.filter(isCash);
   const start = setting?.cents ?? 0,
     anchorDate = setting?.date || '';
-  let anchor = anchorDate ? list.findIndex(e => e.date >= anchorDate) : 0;
-  if (anchor < 0) anchor = list.length;
-  const out = list.map(e => ({ ...e, flowCents: flowOf(e), balanceCents: 0 }));
+  let anchor = anchorDate ? cash.findIndex(e => e.date >= anchorDate) : 0;
+  if (anchor < 0) anchor = cash.length;
   let run = start;
-  for (let i = anchor; i < out.length; i++) out[i].balanceCents = run += out[i].flowCents;
+  for (let i = anchor; i < cash.length; i++) cash[i].balanceCents = run += cash[i].flowCents;
   run = start;
   for (let i = anchor - 1; i >= 0; i--) {
-    out[i].balanceCents = run;
-    run -= out[i].flowCents;
+    cash[i].balanceCents = run;
+    run -= cash[i].flowCents;
   }
   return out;
 }
@@ -199,7 +230,8 @@ export function cashNow(entries, setting) {
   );
 }
 
-export function monthSummary(entries, month) {
+// channel '' means every channel.
+export function monthSummary(entries, month, channel = '') {
   const out = {
     month,
     expenseCents: 0,
@@ -211,7 +243,7 @@ export function monthSummary(entries, month) {
   };
   const by = new Map();
   for (const e of entries) {
-    if (e.deleted || e.date.slice(0, 7) !== month) continue;
+    if (e.deleted || e.date.slice(0, 7) !== month || (channel && e.channel !== channel)) continue;
     out.count++;
     if (e.type === '支出') {
       out.expenseCents += e.amountCents;
@@ -234,41 +266,133 @@ export function detailRows(rows) {
         e.date,
         e.time,
         e.type,
+        e.channel,
         e.amountCents / 100,
-        e.flowCents / 100,
+        e.amountSigned / 100,
         main,
         sub,
         e.party,
         e.note,
-        e.balanceCents / 100,
+        e.balanceCents == null ? '' : e.balanceCents / 100,
         e.id,
         e.updatedAt
       ];
     })
   ];
 }
+// One row per month and channel; the month-end cash only on the 現金 row.
 export function monthRows(rows) {
-  const months = new Map();
+  const groups = new Map();
   for (const e of rows) {
-    const m = e.date.slice(0, 7);
-    const t = months.get(m) || { 支出: 0, 收入: 0, 提款: 0, 存入: 0, count: 0, end: 0 };
+    const key = e.date.slice(0, 7) + '\u0000' + e.channel;
+    const t = groups.get(key) || { 支出: 0, 收入: 0, 提款: 0, 存入: 0, count: 0, end: null };
     t[e.type] += e.amountCents;
     t.count++;
-    t.end = e.balanceCents;
-    months.set(m, t);
+    if (e.balanceCents != null) t.end = e.balanceCents;
+    groups.set(key, t);
   }
   return [
     MONTH_HEADERS,
-    ...[...months].map(([m, t]) => [
-      m,
-      t.支出 / 100,
-      t.收入 / 100,
-      t.提款 / 100,
-      t.存入 / 100,
-      t.count,
-      t.end / 100
+    ...[...groups].map(([key, t]) => {
+      const [m, channel] = key.split('\u0000');
+      return [
+        m,
+        channel,
+        t.支出 / 100,
+        t.收入 / 100,
+        t.提款 / 100,
+        t.存入 / 100,
+        t.count,
+        t.end == null ? '' : t.end / 100
+      ];
+    })
+  ];
+}
+
+// ---------- Your own channels and categories ----------
+// An option is { kind: 渠道|支出分類|收入分類, name, parent, icon, deleted, updatedAt }.
+// A sub-category has the main category's name in parent. Removing one keeps a row marked 已刪除 so other
+// devices learn about it.
+export const optionKey = o => o.kind + '\u0000' + (o.parent || '') + '\u0000' + o.name;
+export function makeOption(input, now = new Date().toISOString()) {
+  const o = {
+    kind: String(input.kind || ''),
+    name: String(input.name || '')
+      .trim()
+      .replace(/／/g, '/')
+      .slice(0, 20),
+    parent: String(input.parent || '').trim(),
+    icon: String(input.icon || '')
+      .trim()
+      .slice(0, 4),
+    deleted: !!input.deleted,
+    updatedAt: String(input.updatedAt || now)
+  };
+  if (!OPTION_KINDS.includes(o.kind)) throw Error('OPTION_KIND');
+  if (!o.name) throw Error('OPTION_NAME');
+  if (o.kind === '渠道') o.parent = '';
+  return o;
+}
+export function mergeOptions(local, remote) {
+  const out = new Map(remote);
+  for (const [k, o] of local) if (!out.has(k) || o.updatedAt > out.get(k).updatedAt) out.set(k, o);
+  return out;
+}
+export function optionRows(options) {
+  return [
+    OPTION_HEADERS,
+    ...[...options.values()].map(o => [
+      o.kind,
+      o.name,
+      o.parent,
+      o.icon,
+      o.deleted ? '已刪除' : '使用中',
+      o.updatedAt
     ])
   ];
+}
+export function readOptions(values) {
+  const out = new Map();
+  if (!values.length || JSON.stringify(values[0]) !== JSON.stringify(OPTION_HEADERS)) return out;
+  for (const r of values.slice(1)) {
+    try {
+      const o = makeOption({
+        kind: r[0],
+        name: String(r[1] ?? ''),
+        parent: String(r[2] ?? ''),
+        icon: String(r[3] ?? ''),
+        deleted: r[4] === '已刪除',
+        updatedAt: String(r[5] || '')
+      });
+      const k = optionKey(o);
+      if (!out.has(k) || o.updatedAt >= out.get(k).updatedAt) out.set(k, o);
+    } catch {
+      // Skip rows edited by hand into something unreadable.
+    }
+  }
+  return out;
+}
+// The channel list: the four defaults, then your own.
+export function channelList(options) {
+  const own = [...options.values()].filter(o => o.kind === '渠道' && !o.deleted).map(o => o.name);
+  return [...new Set([...DEFAULT_CHANNELS, ...own])];
+}
+// The category tree for 支出 or 收入: built-in categories plus your own main and sub categories.
+export function categoryTree(base, options, type) {
+  const kind = type + '分類';
+  const live = [...options.values()].filter(o => o.kind === kind && !o.deleted);
+  const tree = base.map(c => ({ ...c, subs: [...c.subs], own: false }));
+  for (const o of live.filter(o => !o.parent))
+    if (!tree.some(c => c.name === o.name))
+      tree.push({ name: o.name, icon: o.icon || '🏷️', subs: [], own: true });
+  for (const o of live.filter(o => o.parent)) {
+    const main = tree.find(c => c.name === o.parent);
+    if (main && !main.subs.includes(o.name)) main.subs.push(o.name);
+  }
+  return tree.map(c => ({
+    ...c,
+    ownSubs: live.filter(o => o.parent === c.name).map(o => o.name)
+  }));
 }
 export function settingRows(setting, cashCents) {
   return [
@@ -278,7 +402,11 @@ export function settingRows(setting, cashCents) {
     ['設定更新時間', setting?.updatedAt || '', ''],
     ['目前現金（元）', cashCents / 100, '最後一次同步時算出的金額'],
     ['同步時間', new Date().toISOString(), ''],
-    ['說明', '「記帳明細」一列一筆、已是最新狀態；「異動紀錄」保留每次修改，請勿手動編輯。', '']
+    [
+      '說明',
+      '「記帳明細」一列一筆、已是最新狀態；「記帳後現金」只算渠道為現金的記帳。「異動紀錄」保留每次修改，請勿手動編輯。',
+      ''
+    ]
   ];
 }
 export function readSetting(values) {
