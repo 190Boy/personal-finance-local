@@ -53,7 +53,8 @@ const messages = {
   GOOGLE_CONFIG: '網站尚未設定 Google 連接。',
   GOOGLE_LOGIN_REQUIRED: 'Google 授權已過期，按右上角重新連接即可同步。',
   GOOGLE_API: 'Google 試算表暫時無法寫入，記帳已先存在這台裝置。',
-  SHEET_SCHEMA: '試算表「異動紀錄」的欄位被改動過，請還原第一列的欄名。'
+  SHEET_SCHEMA: '試算表「異動紀錄」的欄位被改動過，請還原第一列的欄名。',
+  SHEET_ROWS: '試算表「記帳明細」有看不懂的列，這次沒有同步，試算表也沒有被改動。'
 };
 const pad = n => String(n).padStart(2, '0');
 const today = () => {
@@ -542,6 +543,12 @@ async function connect({ chooser = false } = {}) {
     drawStatus();
   }
 }
+function showNotice(text, kind) {
+  const n = $('syncNotice');
+  n.textContent = text;
+  n.hidden = !text;
+  n.dataset.kind = kind || '';
+}
 async function sync() {
   if (!store.connected || !store.file) return;
   if (syncing) {
@@ -559,8 +566,21 @@ async function sync() {
       fileId: result.fileId
     });
     lastError = '';
+    showNotice(result.fromSheet ? '已從試算表收回 ' + result.fromSheet + ' 筆新增或修改。' : '', 'ok');
   } catch (error) {
     lastError = messages[error.message] || '同步失敗，記帳已先存在這台裝置。';
+    if (error.problems)
+      showNotice(
+        lastError +
+          '請到試算表修正：' +
+          error.problems
+            .slice(0, 5)
+            .map(p => '第 ' + p.row + ' 列：' + p.reason)
+            .join('；') +
+          (error.problems.length > 5 ? '…等 ' + error.problems.length + ' 列' : '') +
+          '。改好後點右上角重新同步。',
+        'bad'
+      );
   } finally {
     syncing = false;
     refresh();

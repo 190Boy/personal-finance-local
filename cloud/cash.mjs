@@ -52,8 +52,8 @@ export const MONTH_HEADERS = [
   '筆數',
   '月底現金（元）'
 ];
-// 試算表欄位或資料意義有變時加 1，並同步更新 BOT 說明書（見 README）。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）。
-export const SCHEMA_VERSION = 2;
+// 試算表欄位或資料意義有變時加 1，並同步更新 BOT 說明書（見 README）。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）；3 = v1.2.0 起（記帳明細可直接打字）。
+export const SCHEMA_VERSION = 3;
 export const SETTING_SHEET = '設定';
 export const SETTING_HEADERS = ['項目', '內容', '說明'];
 // 自己新增的渠道、分類、子分類。種類：渠道／支出分類／收入分類；子分類的「上層」填主分類名稱。
@@ -423,4 +423,118 @@ export function readSetting(values) {
     updatedAt = String(get('設定更新時間') ?? '');
   if (!Number.isSafeInteger(cents) || !DATE.test(date)) return null;
   return { cents, date, updatedAt };
+}
+
+// ---------- Rows typed straight into 記帳明細 ----------
+// The sheet is rewritten on every sync, so before that we read it back: a row without an ID is a new record
+// typed in the sheet, a row whose content differs from the stored version is an edit, and 類型 = 刪除 deletes.
+// Removing a whole row does nothing (the row comes back), so a slip of the mouse never deletes a record.
+// Any row that cannot be read stops the sync, so nothing typed in the sheet is ever overwritten.
+export const DELETE_WORD = '刪除';
+const pad2 = n => String(n).padStart(2, '0');
+function looseDate(v) {
+  if (typeof v === 'number' && v > 20000 && v < 80000) {
+    // A spreadsheet serial day number.
+    const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000);
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+  }
+  const m = String(v ?? '')
+    .trim()
+    .match(/^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?(?:\s.*)?$/);
+  if (!m) return '';
+  const date = m[1] + '-' + pad2(m[2]) + '-' + pad2(m[3]);
+  const check = new Date(date + 'T00:00:00Z');
+  return DATE.test(date) && check.getUTCDate() === +m[3] ? date : '';
+}
+function looseTime(v) {
+  if (v === '' || v == null) return '';
+  if (typeof v === 'number' && v >= 0 && v < 1) {
+    const minutes = Math.round(v * 1440);
+    return pad2(Math.floor(minutes / 60) % 24) + ':' + pad2(minutes % 60);
+  }
+  const m = String(v)
+    .trim()
+    .match(/^(上午|下午|AM|PM)?\s*(\d{1,2})[:：](\d{2})(?:[:：]\d{2})?\s*(AM|PM|上午|下午)?$/i);
+  if (!m) return null;
+  let h = +m[2];
+  const half = (m[1] || m[4] || '').toUpperCase();
+  if ((half === '下午' || half === 'PM') && h < 12) h += 12;
+  if ((half === '上午' || half === 'AM') && h === 12) h = 0;
+  return h < 24 ? pad2(h) + ':' + m[3] : null;
+}
+function looseCents(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.round(Math.abs(v) * 100) : NaN;
+  return parseCents(String(v ?? '').replace(/^[-−]/, ''));
+}
+const SAME = ['date', 'time', 'type', 'channel', 'amountCents', 'category', 'party', 'note'];
+const ROW_REASONS = {
+  CASH_DATE: '日期看不懂，請用 2026-11-13 或 2026/11/13',
+  CASH_TIME: '時間看不懂，請用 14:30，或留空',
+  CASH_TYPE: '類型只能是支出、收入、提款、存入，或「刪除」',
+  CASH_AMOUNT: '金額要是大於 0 的數字',
+  CASH_CHANNEL: '渠道不能是空的',
+  CASH_ID: 'ID 不正確，新增的列請讓 ID 留空'
+};
+// values: the 記帳明細 sheet as read; known: the stored records by ID.
+// Returns { changes: records to save, problems: [{ row, reason }] }.
+export function readDetailEdits(
+  values,
+  known,
+  { now = new Date().toISOString(), newId = () => crypto.randomUUID() } = {}
+) {
+  const changes = [],
+    problems = [];
+  if (!values.length) return { changes, problems };
+  const head = values[0].map(h => String(h).trim());
+  const col = name => head.indexOf(name);
+  const need = ['日期', '時間', '類型', '渠道', '金額（元）', '主分類', '子分類', '對象／商店', '備註', 'ID'];
+  const missing = need.filter(n => col(n) < 0);
+  if (missing.length)
+    return {
+      changes,
+      problems: [{ row: 1, reason: '找不到欄位：' + missing.join('、') + '。請還原第一列的欄名' }]
+    };
+  const cell = (r, name) => r[col(name)] ?? '';
+  values.slice(1).forEach((r, i) => {
+    const row = i + 2;
+    if (!r.some(v => String(v ?? '').trim() !== '')) return;
+    const id = String(cell(r, 'ID')).trim();
+    const old = id ? known.get(id) : null;
+    const typeText = String(cell(r, '類型')).trim();
+    if (typeText === DELETE_WORD) {
+      if (old && !old.deleted) changes.push({ ...old, deleted: true, updatedAt: now });
+      return;
+    }
+    const date = looseDate(cell(r, '日期'));
+    const time = looseTime(cell(r, '時間'));
+    const type = typeText || '支出';
+    const main = String(cell(r, '主分類')).trim(),
+      sub = String(cell(r, '子分類')).trim();
+    const category =
+      type === '支出' || type === '收入'
+        ? (main || (type === '收入' ? '其他收入' : '其他')) + (sub ? '／' + sub : '')
+        : '';
+    try {
+      if (!date) throw Error('CASH_DATE');
+      if (time === null) throw Error('CASH_TIME');
+      const e = makeEntry({
+        id: id || newId(),
+        date,
+        time,
+        type,
+        amountCents: looseCents(cell(r, '金額（元）')),
+        category,
+        channel: String(cell(r, '渠道')).trim() || CASH,
+        party: String(cell(r, '對象／商店')),
+        note: String(cell(r, '備註')),
+        createdAt: old?.createdAt || now,
+        updatedAt: now
+      });
+      if (old && !old.deleted && SAME.every(k => old[k] === e[k])) return;
+      changes.push(e);
+    } catch (error) {
+      problems.push({ row, reason: ROW_REASONS[error.message] || '這一列看不懂' });
+    }
+  });
+  return { changes, problems };
 }
