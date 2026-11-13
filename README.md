@@ -11,7 +11,7 @@
 - **沒有後端**。資料只存在使用者裝置（localStorage）和他自己的 Google 試算表。
 - **舊的完整版**：v0.16.1 以前有銀行、信用卡、股票、雲端發票、LINE Pay、報表等功能，保存在 `backup/full-v0.16.1` 分支，**不要刪**。
 
-目前版本：v1.1.2，資料格式版本 2。
+目前版本：v1.1.3，資料格式版本 2。
 
 ## 架構
 
@@ -61,7 +61,7 @@ npm start         # 本機預覽 http://127.0.0.1:4173/web/
 ## 每完成一個段落的檢查清單
 
 1. `npm test` 通過，`npm run build:pwa` 已執行。
-2. 版本號一起改：`package.json`、`tools/build-sw.cjs`、`web/index.html` 的設定頁版本字樣、本檔的「目前版本」。
+2. 版本號一起改：`package.json`、`tools/build-sw.cjs`、`web/index.html` 的版本字樣（頂端列與設定頁兩處）、本檔的「目前版本」。
 3. `CHANGELOG.md` 加一段給 Andy 看的白話說明（新增、修正、補充說明）。
 4. **只要試算表的欄位、工作表或資料意義有任何改變**：
    - `cloud/cash.mjs` 的 `SCHEMA_VERSION` 加 1。
