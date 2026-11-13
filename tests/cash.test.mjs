@@ -132,6 +132,12 @@ test('the newer version of a record or setting wins in either direction', () => 
   const setting = { cents: 123450, date: '2026-11-13', updatedAt: '2026-11-13T03:00:00Z' };
   assert.deepEqual(readSetting(settingRows(setting, 0)), setting);
   assert.equal(readSetting(settingRows(null, 0)), null);
+  assert.deepEqual(
+    settingRows(setting, 0)
+      .find(r => r[0] === '資料格式版本')
+      .slice(0, 2),
+    ['資料格式版本', 2]
+  );
 });
 
 function memoryStorage() {

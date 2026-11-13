@@ -52,6 +52,8 @@ export const MONTH_HEADERS = [
   '筆數',
   '月底現金（元）'
 ];
+// 試算表欄位或資料意義有變時加 1，並同步更新 docs/BOT.md。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）。
+export const SCHEMA_VERSION = 2;
 export const SETTING_SHEET = '設定';
 export const SETTING_HEADERS = ['項目', '內容', '說明'];
 // 自己新增的渠道、分類、子分類。種類：渠道／支出分類／收入分類；子分類的「上層」填主分類名稱。
@@ -402,6 +404,7 @@ export function settingRows(setting, cashCents) {
     ['設定更新時間', setting?.updatedAt || '', ''],
     ['目前現金（元）', cashCents / 100, '最後一次同步時算出的金額'],
     ['同步時間', new Date().toISOString(), ''],
+    ['資料格式版本', SCHEMA_VERSION, '欄位或資料意義改變時加 1，對照 GitHub 上的 docs/BOT.md'],
     [
       '說明',
       '「記帳明細」一列一筆、已是最新狀態；「記帳後現金」只算渠道為現金的記帳。「異動紀錄」保留每次修改，請勿手動編輯。',
