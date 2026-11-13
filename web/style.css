@@ -751,3 +751,52 @@ button.row:hover {
   color: var(--muted);
   margin: 12px 0 6px;
 }
+
+/* iOS gives date/time inputs their own minimum width and height, which pushes them out of their grid
+   cell. Reset them, and let grid columns shrink below their content. */
+input[type='date'],
+input[type='time'],
+input[type='month'] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+input[type='date']::-webkit-date-and-time-value,
+input[type='time']::-webkit-date-and-time-value,
+input[type='month']::-webkit-date-and-time-value {
+  text-align: inherit;
+  margin: 0;
+}
+.date-step input::-webkit-date-and-time-value {
+  text-align: center;
+}
+.field-row {
+  grid-template-columns: minmax(0, 1fr) 112px;
+}
+.field-row > label {
+  min-width: 0;
+}
+.month-step,
+.date-step {
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+}
+.inline-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.entry-form input:not(#amount):not(#optionIcon):not(#optionName),
+.inline-form input {
+  height: 40px;
+  min-height: 40px;
+  line-height: 24px;
+}
+.topbar .version {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: -2px;
+  align-self: flex-end;
+  padding-bottom: 13px;
+}
