@@ -22,6 +22,7 @@ import {
   optionRows,
   channelList,
   categoryTree,
+  readDetailEdits,
   LOG_HEADERS_V1,
   LOG_HEADERS,
   DETAIL_HEADERS
@@ -136,7 +137,7 @@ test('the newer version of a record or setting wins in either direction', () => 
     settingRows(setting, 0)
       .find(r => r[0] === '資料格式版本')
       .slice(0, 2),
-    ['資料格式版本', 2]
+    ['資料格式版本', 3]
   );
 });
 
@@ -382,4 +383,109 @@ test('options added on the phone stay pending until the sheet has them', () => {
   local.synced({ entries: new Map(), setting: null, options: new Map([[optionKey(o), o]]), fileId: 'f' });
   assert.equal(local.pendingCount, 0);
   assert.equal(local.options.get(optionKey(o)).name, '寵物');
+});
+
+test('rows typed in 記帳明細 come back: new rows, edits, 刪除, loose formats; bad rows are reported', () => {
+  const old = makeEntry({
+    id: 'k1',
+    type: '支出',
+    date: '2026-11-10',
+    amount: '160',
+    category: '餐飲／午餐',
+    createdAt: '2026-11-10T01:00:00Z',
+    updatedAt: '2026-11-10T01:00:00Z'
+  });
+  const gone = { ...old, id: 'k2', amountCents: 5000 };
+  const known = new Map([
+    ['k1', old],
+    ['k2', gone]
+  ]);
+  const sheet = detailRows(ledger([old, gone], null));
+  // The rows the app wrote come back unchanged.
+  assert.deepEqual(readDetailEdits(sheet, known), { changes: [], problems: [] });
+  let n = 0;
+  const opts = { now: '2026-11-13T08:00:00Z', newId: () => 'new' + ++n };
+  const typed = structuredClone(sheet);
+  typed[1][4] = 180; // edit the amount of k1
+  typed[2][2] = '刪除'; // delete k2
+  const blank = DETAIL_HEADERS.map(() => '');
+  const row = values => DETAIL_HEADERS.map(h => values[h] ?? '');
+  typed.push(
+    blank,
+    row({
+      日期: '2026/11/13',
+      時間: '下午 2:30',
+      '金額（元）': '1,200',
+      主分類: '交通',
+      子分類: '計程車',
+      渠道: ''
+    }),
+    row({ 日期: '2026年11月13日', '金額（元）': 45, 類型: '收入' }),
+    row({ 日期: '11/13', '金額（元）': 10 }),
+    row({ 日期: '2026-11-13', '金額（元）': 'abc' })
+  );
+  const r = readDetailEdits(typed, known, opts);
+  assert.deepEqual(r.problems, [
+    { row: 7, reason: '日期看不懂，請用 2026-11-13 或 2026/11/13' },
+    { row: 8, reason: '金額要是大於 0 的數字' }
+  ]);
+  const by = new Map(r.changes.map(e => [e.id, e]));
+  assert.equal(by.get('k1').amountCents, 18000);
+  assert.equal(by.get('k1').createdAt, old.createdAt);
+  assert.equal(by.get('k2').deleted, true);
+  assert.deepEqual(
+    [
+      by.get('new1').date,
+      by.get('new1').time,
+      by.get('new1').type,
+      by.get('new1').amountCents,
+      by.get('new1').category,
+      by.get('new1').channel
+    ],
+    ['2026-11-13', '14:30', '支出', 120000, '交通／計程車', '現金']
+  );
+  assert.equal(by.get('new2').category, '其他收入');
+  // Serial numbers from the spreadsheet also read as dates and times.
+  const serial = readDetailEdits(
+    [DETAIL_HEADERS, row({ 日期: 46339, 時間: 0.5, '金額（元）': 1 })],
+    new Map(),
+    opts
+  );
+  assert.deepEqual([serial.changes[0].date, serial.changes[0].time], ['2026-11-13', '12:00']);
+  // A renamed header stops everything.
+  const broken = structuredClone(sheet);
+  broken[0][0] = '日子';
+  assert.match(readDetailEdits(broken, known).problems[0].reason, /找不到欄位：日期/);
+});
+
+test('a sync takes rows typed in the sheet, and refuses to overwrite a sheet with an unreadable row', async () => {
+  const g = fakeGoogle();
+  const s = new CashStore({ fetcher: g.fetcher });
+  s.authorize('t', 3600);
+  await s.open();
+  const book = g.books.get('sheet1');
+  const lunch = e('支出', '2026-11-13', '160', { id: 'lunch' });
+  await s.sync(new Map([['lunch', lunch]]), null);
+  const row = values => DETAIL_HEADERS.map(h => values[h] ?? '');
+  book.values['記帳明細'].push(
+    row({ 日期: '2026/11/13', '金額（元）': 85, 主分類: '餐飲', 子分類: '飲料', '對象／商店': '50嵐' })
+  );
+  let r = await s.sync(new Map([['lunch', lunch]]), null);
+  assert.equal(r.fromSheet, 1);
+  const tea = [...r.entries.values()].find(x => x.party === '50嵐');
+  assert.ok(tea && tea.id);
+  // It now has an ID in the sheet and a row in the log.
+  assert.ok(book.values['記帳明細'].some(x => x[11] === tea.id));
+  assert.ok(book.values['異動紀錄'].some(x => x[0] === tea.id));
+  // A second sync changes nothing.
+  r = await s.sync(r.entries, null);
+  assert.equal(r.fromSheet, 0);
+  // An unreadable row: the sync stops and the sheet keeps what the user typed.
+  book.values['記帳明細'].push(row({ 日期: '昨天', '金額（元）': 30 }));
+  const before = JSON.stringify(book.values);
+  await assert.rejects(
+    () => s.sync(r.entries, null),
+    e => e.message === 'SHEET_ROWS' && e.problems[0].row === book.values['記帳明細'].length
+  );
+  assert.equal(JSON.stringify(book.values), before);
 });

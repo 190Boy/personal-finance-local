@@ -1,5 +1,5 @@
 // 現金記帳的 Google 試算表：第一次連接時由網站自己建立「現金記帳」，之後每次同步：
-// 1. 讀「異動紀錄」（每次新增、修改、刪除各一列，只增不改）與「設定」；
+// 1. 讀「異動紀錄」（每次新增、修改、刪除各一列，只增不改）與「設定」，並把直接在「記帳明細」打的新增、修改、刪除收回來；
 // 2. 和手機上的記帳合併，新的版本勝出；把手機上較新的版本補進「異動紀錄」；
 // 3. 依合併結果整份重寫「記帳明細」「月份統計」「設定」「選項」，讓 BOT 只要讀「記帳明細」就是最新狀態。
 // 權限只用 drive.file：網站只看得到它自己建立的檔案，看不到雲端硬碟裡的其他檔案。
@@ -12,6 +12,7 @@ import {
   OPTION_SHEET,
   LOG_HEADERS_V1,
   latest,
+  readDetailEdits,
   mergeOptions,
   readOptions,
   optionRows,
@@ -155,9 +156,15 @@ export class CashStore {
         body: { values: [LOG_HEADERS] }
       });
   }
+  // Dates and times typed in the sheet come back as the text the user sees, not as serial numbers.
   async read(sheet) {
     const data = await this.api(
-      SHEETS + '/' + this.file.id + '/values/' + range(sheet) + '?valueRenderOption=UNFORMATTED_VALUE'
+      SHEETS +
+        '/' +
+        this.file.id +
+        '/values/' +
+        range(sheet) +
+        '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING'
     );
     return data.values || [];
   }
@@ -167,8 +174,20 @@ export class CashStore {
     if (!this.file) throw Error('GOOGLE_LOGIN_REQUIRED');
     const id = this.file.id;
     const remote = latest(readLog(await this.read(LOG_SHEET)));
+    // Rows typed or changed straight in 記帳明細 since the last sync. Stop before anything is written if a
+    // row cannot be read, so the user's typing is never overwritten.
+    const typed = readDetailEdits(await this.read(DETAIL_SHEET), remote);
+    if (typed.problems.length) {
+      const error = Error('SHEET_ROWS');
+      error.problems = typed.problems;
+      throw error;
+    }
+    for (const e of typed.changes) remote.set(e.id, e);
     const remoteSetting = readSetting(await this.read(SETTING_SHEET));
-    const { merged, upload } = mergeEntries(local, remote);
+    const merged0 = mergeEntries(local, remote);
+    const merged = merged0.merged;
+    // The sheet's own edits go into the log too, unless this device has an even newer version.
+    const upload = [...typed.changes.filter(e => merged.get(e.id) === e), ...merged0.upload];
     const setting = mergeSetting(localSetting, remoteSetting);
     const options = mergeOptions(localOptions, readOptions(await this.read(OPTION_SHEET)));
     if (upload.length)
@@ -201,6 +220,13 @@ export class CashStore {
         ]
       }
     });
-    return { entries: merged, setting, options, uploaded: upload.length, fileId: id };
+    return {
+      entries: merged,
+      setting,
+      options,
+      uploaded: upload.length,
+      fromSheet: typed.changes.length,
+      fileId: id
+    };
   }
 }
