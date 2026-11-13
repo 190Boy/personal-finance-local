@@ -1,8 +1,8 @@
 {
-  "name": "finance-local-pdf-lab",
-  "version": "0.16.1",
+  "name": "cash-ledger",
+  "version": "1.0.0",
   "private": true,
-  "description": "Local-only PDF.js bank statement parsing experiment",
+  "description": "Cash-only bookkeeping PWA that syncs to the user's own Google Sheet",
   "scripts": {
     "start": "node tools/serve.cjs",
     "test": "node --test tests/*.test.mjs",

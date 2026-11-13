@@ -1,725 +1,537 @@
-import { initCards } from './cards.mjs';
-import { initInvoices } from './invoices.mjs';
-import { initMatching } from './matching.mjs';
-import { initLinePay } from './linepay.mjs';
-import { initManual } from './manual.mjs';
-import { setHistoryCloud } from './history.mjs';
-import { initAccountsView } from './accounts-view.mjs';
-import { initRecurring } from './recurring.mjs';
-import { initReports } from './reports.mjs';
-import { initStocks } from './stocks.mjs';
-import { initCloud } from '../cloud/ui.mjs';
-import { inspectTable, parseEsunTable, TABLE_FIELDS } from '../pdf-parser/tabular.mjs';
-import { readLocalExcel } from '../pdf-parser/excel.mjs';
-import { applyExtractionWarnings } from '../pdf-parser/geometry.mjs';
-import { initPwa, clearPublicCache } from './pwa.mjs';
-import { parseStatement, moneyCents, groupLines, markCrossFileDuplicates } from '../pdf-parser/parser.mjs';
-import { toCSV, toJSON } from '../pdf-parser/export.mjs';
+// 現金記帳：記帳先存在這台裝置，連上 Google 後同步到你自己的「現金記帳」試算表。
+import { makeEntry, ledger, cashNow, monthSummary, parseCents } from '../cloud/cash.mjs';
+import { CashLocal } from '../cloud/cash-local.mjs';
+import { CashStore, SCOPE } from '../cloud/cash-store.mjs';
+import { loadGis, requestToken } from '../cloud/auth.mjs';
+import { rememberedAccount, rememberAccount } from '../cloud/login-preferences.mjs';
+import { CATEGORY_TREE, iconOf } from '../cloud/categories.mjs';
+import { row, dayHeader, groupByDay, yuan, CATEGORY_COLORS } from './rows.mjs';
+import { initPwa } from './pwa.mjs';
+
 const $ = id => document.getElementById(id);
-const errorMessages = {
-  EMPTY_FILE: '檔案是空的。',
-  FILE_TOO_LARGE: '檔案超過 25 MiB。',
-  INVALID_PDF_HEADER: '檔頭不是 PDF。',
-  PASSWORD_REQUIRED: '這份 PDF 需要密碼，請輸入後重試。',
-  WRONG_PASSWORD: 'PDF 密碼錯誤，請重新輸入。',
-  PDF_READ_FAILED:
-    'PDF 無法讀取。請先檢查密碼、檔案完整性與 PDF.js／Worker 版本，尚不能判定銀行格式不受支援。',
-  PAGE_LIMIT: '超過 200 頁上限。',
-  TEXT_LIMIT: '擷取文字超過本機測試上限。',
-  TIME_LIMIT: '處理超過 90 秒，已停止。可先使用較小的測試檔。',
-  ROTATED_PAGE: '目前不解析旋轉頁面，以免欄位錯位。',
-  ROTATED_TEXT: '偵測到旋轉文字，需檢查原檔版型。',
-  WORKER_FAILED: '本機 Worker 啟動失敗，請確認 PDF.js 與 Worker 版本一致及瀏覽器支援模組 Worker。',
-  CANCELLED: '已取消並清除本次資料。',
-  REPEATED_PDF: '此檔案已在本次頁面處理過。未重複加入資料；如需重新校正，先清除本次資料。',
-  INVALID_COLUMNS: '手動欄位必須包含日期、摘要、支出、收入、餘額，百分比介於 0–100 且不可重複。',
-  INVALID_OPENING: '期初餘額格式錯誤，請輸入完整數字。',
-  EXCEL_MAPPING: '請確認日期、摘要、提款、存入、餘額欄位，且不可對應到同一欄。',
-  EXCEL_EMPTY: 'Excel 沒有可讀取的資料。',
-  EXCEL_REQUIRED: '玉山請選銀行匯出的 .xls／.xlsx；中信請選 PDF。',
-  EXCEL_FORMAT: '檔案內容不是支援的 Excel 格式。',
-  EXCEL_ENCRYPTED: '這種 Excel 加密方式尚未支援；未上傳檔案。',
-  EXCEL_PASSWORD_REQUIRED: '這份 Excel 需要開啟密碼。請輸入密碼，再點本機解密並讀取 Excel。',
-  EXCEL_WRONG_PASSWORD: 'Excel 密碼錯誤，請重新輸入後重試。',
-  EXCEL_PASSWORD_LENGTH: 'Excel 密碼不可超過 255 個字元。',
-  EXCEL_ENCRYPTION_UNSUPPORTED: '這份 Excel 的加密方式尚未支援；未上傳檔案。',
-  EXCEL_DECRYPT_FAILED: 'Excel 解密失敗，請確認檔案完整性與加密方式；未上傳檔案。',
-  EXCEL_READ_FAILED: 'Excel 無法讀取，請重新從銀行下載。',
-  EXCEL_LIMIT: 'Excel 超過 50,000 列、256 欄、20 張工作表或文字大小上限。',
-  EXCEL_TIMEOUT: 'Excel 讀取超過 30 秒，已停止並清除 Worker。',
-  EXCEL_WORKER: 'Excel 本機 Worker 無法啟動，請確認網站程式載入完整。'
-};
-const reasonNames = {
-  EXCEL_FORMULA: '來源含公式，未執行且須核對',
-  EXCEL_CELL_ERROR: '來源含 Excel 錯誤值',
-  EXCEL_ROW_WIDTH: '此列欄數與表頭不同',
-  NON_HORIZONTAL_TEXT: '有未納入表格的文字',
-  INVALID_DATE: '日期無效',
-  INVALID_TIME: '時間無效',
-  MISSING_SUMMARY: '缺少摘要',
-  INVALID_AMOUNT: '金額無效',
-  INVALID_BALANCE: '餘額無效',
-  ZERO_FLOW: '收入支出均為零',
-  BOTH_DIRECTIONS: '同時有收入與支出',
-  NEGATIVE_FLOW: '負數資金方向需核對',
-  FEE_REQUIRES_REVIEW: '手續費無效或來源處理方式待確認',
-  UNMAPPED_ROW: '欄位未定位',
-  AMBIGUOUS_CONTINUATION: '跨行內容不明',
-  DUPLICATE_CANDIDATE: '相同交易候選',
-  CROSS_FILE_DUPLICATE_CANDIDATE: '其他 PDF 已有相同交易候選',
-  HEADER_NOT_FOUND: '未找到表頭',
-  ORPHAN_FINANCIAL_ROW: '有金額但缺日期',
-  BANK_MISMATCH: '銀行選擇與文件標記不一致',
-  NO_TRANSACTIONS: '未識別交易',
-  ORDER_MISMATCH: '交易順序不符'
-};
-let extractor = null,
-  result = null,
-  pages = null,
-  busy = false,
-  run = 0,
-  controller = null;
-let tableDraft = null,
-  excelBook = null,
-  importContext = null;
-const seenFiles = new Set(),
-  seenTransactions = new Set(),
-  urls = new Set();
-
-const routes = [
-  'login',
-  'home',
-  'transactions',
-  'import',
-  'bank-import',
-  'stocks',
-  'cards',
-  'invoices',
-  'linepay',
-  'matching',
-  'manual',
-  'accounts',
-  'recurring',
-  'reports',
-  'settings'
-];
-function updateRoute(focus = false) {
-  const requested = location.hash.slice(1);
-  const route = routes.includes(requested) ? requested : 'login';
-  document.body.classList.toggle('login-view', route === 'login');
-  document.querySelectorAll('[data-route]').forEach(view => {
-    view.hidden = view.dataset.route !== route;
-  });
-  const section = ['matching', 'recurring'].includes(route)
-    ? 'transactions'
-    : ['home', 'accounts', 'manual', 'transactions', 'reports'].includes(route)
-      ? route
-      : '';
-  document.querySelectorAll('[data-nav]').forEach(link => {
-    if (link.dataset.nav === section) link.setAttribute('aria-current', 'page');
-    else link.removeAttribute('aria-current');
-  });
-  document.querySelector('.topmenu')?.removeAttribute('open');
-  $('emptyTransactions').hidden = !!result;
-  if (focus) {
-    const view = document.querySelector('[data-route="' + route + '"]');
-    const heading = view?.querySelector('h1,h2');
-    heading?.setAttribute('tabindex', '-1');
-    heading?.focus({ preventScroll: true });
-    window.scrollTo(0, 0);
-  }
-}
-window.addEventListener('hashchange', () => updateRoute(true));
-window.addEventListener('finance-signout', clearAll);
-
-const sensitiveInputs = ['pdfFile', 'password', 'opening', 'account'];
-const format = c =>
-  Number.isSafeInteger(c)
-    ? (c / 100).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : '—';
-function status(text) {
-  $('status').textContent = text;
-}
-function exportsEnabled() {
-  const enabled = !!result && !busy && $('confirmExport').checked;
-  $('csv').disabled = !enabled;
-  $('json').disabled = !enabled;
-}
-function setBusy(value) {
-  busy = value;
-  $('clearCache').disabled = value;
-  for (const id of [
-    'parse',
-    'bank',
-    'pdfFile',
-    'password',
-    'order',
-    'opening',
-    'account',
-    'manual',
-    'col-date',
-    'col-time',
-    'col-summary',
-    'col-expense',
-    'col-income',
-    'col-balance',
-    'col-note'
-  ])
-    $(id).disabled =
-      value || (id === 'parse' && ($('bank').value === 'esun' ? !$('pdfFile').files.length : !extractor));
-  for (const el of $('excelOptions').querySelectorAll('select')) el.disabled = value;
-  exportsEnabled();
-}
-function discardPreview() {
-  result = null;
-  importContext = null;
-  if (pages) {
-    pages.length = 0;
-    pages = null;
-  }
-  $('rows').replaceChildren();
-  $('mobileRows').replaceChildren();
-  $('homePreview').textContent = '尚無本次預覽資料。';
-  $('emptyTransactions').hidden = false;
-  $('issues').textContent = '';
-  $('rawText').textContent = '';
-  $('resultSummary').textContent = '';
-  $('validation').textContent = '';
-  $('resultPanel').hidden = true;
-  $('confirmExport').checked = false;
-  exportsEnabled();
-}
-function clearAll() {
-  window.dispatchEvent(new Event('finance-clear-local'));
-  run++;
-  controller?.abort();
-  controller = null;
-  discardPreview();
-  tableDraft = null;
-  excelBook = null;
-  $('excelSheet').replaceChildren();
-  $('excelMapping').replaceChildren();
-  $('excelHeader').replaceChildren();
-  $('excelInfo').textContent = '';
-  seenFiles.clear();
-  seenTransactions.clear();
-  for (const id of sensitiveInputs) $(id).value = '';
-  window.dispatchEvent(new Event('account-source-reset'));
-  for (const url of urls) URL.revokeObjectURL(url);
-  urls.clear();
-  setBusy(false);
-  status('已清除頁面持有的資料與本次重複檢查紀錄。');
-}
-function columns() {
-  if (!$('manual').checked) return null;
-  const out = {};
-  for (const key of ['date', 'time', 'summary', 'expense', 'income', 'balance', 'note']) {
-    const value = $('col-' + key).value.trim();
-    if (value === '') continue;
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error('INVALID_COLUMNS');
-    out[key] = n;
-  }
-  if (
-    !['date', 'summary', 'expense', 'income', 'balance'].every(k => k in out) ||
-    new Set(Object.values(out)).size !== Object.keys(out).length
-  )
-    throw new Error('INVALID_COLUMNS');
-  return out;
-}
-function render() {
-  const { transactions, stats, balance, validation } = result;
-  $('resultPanel').hidden = false;
-  $('emptyTransactions').hidden = true;
-  $('homePreview').textContent = '本次匯入預覽：' + transactions.length + ' 筆，尚未入帳。';
-  $('mobileRows').replaceChildren();
-  $('resultSummary').textContent =
-    (result.sourceType === 'excel' ? '玉山 Excel' : stats.pages + ' 頁') +
-    ' · ' +
-    stats.rows +
-    ' 筆 · ' +
-    stats.invalidRows +
-    ' 筆欄位待核對 · ' +
-    balance.checked +
-    ' 次餘額比較／' +
-    balance.failed +
-    ' 次不符';
-  $('validation').textContent =
-    '人工核對必須完成。欄位結構：' +
-    (validation.fieldChecksPass ? '檢查通過' : '存在待核對項目') +
-    '；完整餘額檢查：' +
-    (balance.complete ? '通過' : '未通過或缺少起始餘額') +
-    '。真實銀行樣本尚未驗收，不能視為正式入帳。';
-  $('rows').replaceChildren();
-  for (const t of transactions) {
-    const row = document.createElement('tr');
-    const check = t.balanceCheck || {};
-    const checkLabel =
-      check.status === 'pass'
-        ? '吻合'
-        : check.status === 'fail'
-          ? '不符（差 ' + format(check.differenceCents) + '）'
-          : check.status === 'no_opening'
-            ? '無起始餘額'
-            : '無法核對';
-    const values = [
-      t.date || '無效日期',
-      t.time || '未提供',
-      t.summary || '—',
-      format(t.expenseCents),
-      format(t.incomeCents),
-      format(t.feeCents),
-      format(t.balanceCents),
-      t.typeHint,
-      result.sourceType === 'excel'
-        ? 'Excel 第 ' + t.sourceLine + ' 列'
-        : t.page === t.endPage
-          ? t.page
-          : t.page + '–' + t.endPage,
-      checkLabel,
-      (t.errors.length
-        ? [...new Set(t.errors)].map(k => reasonNames[k] || k).join('、')
-        : '仍需逐欄人工核對') +
-        (t.feeCents !== null && t.feeCents !== undefined ? '；獨立手續費：' + format(t.feeCents) : '')
-    ];
-    values.forEach((v, i) => {
-      const cell = document.createElement('td');
-      cell.textContent = String(v);
-      if ((i === 9 && check.status === 'fail') || (i === 10 && t.errors.length)) cell.className = 'bad';
-      if (i === 9 && check.status === 'pass') cell.className = 'good';
-      row.append(cell);
-    });
-
-    $('rows').append(row);
-    const card = document.createElement('article');
-    card.className = 'transaction-card';
-    const title = document.createElement('h3');
-    title.textContent = t.summary || '未識別摘要';
-    card.append(title);
-    const date = document.createElement('p');
-    date.className = 'muted';
-    date.textContent = (t.date || '日期待核對') + ' · ' + (t.time || '未提供時間');
-    card.append(date);
-    const dl = document.createElement('dl');
-    for (const [name, value] of [
-      ['支出', format(t.expenseCents)],
-      ['收入', format(t.incomeCents)],
-      ['手續費', format(t.feeCents)],
-      ['餘額', format(t.balanceCents)],
-      ['來源位置', values[8]]
-    ]) {
-      const block = document.createElement('div'),
-        dt = document.createElement('dt'),
-        dd = document.createElement('dd');
-      dt.textContent = name;
-      dd.textContent = String(value);
-      block.append(dt, dd);
-      dl.append(block);
-    }
-    card.append(dl);
-    for (const [name, value] of [
-      ['餘額檢查', checkLabel],
-      ['辨識提示', t.typeHint],
-      ['待核對', values[10]]
-    ]) {
-      const p = document.createElement('p');
-      p.className = name === '待核對' && t.errors.length ? 'bad' : 'muted';
-      p.textContent = name + '：' + value;
-      card.append(p);
-    }
-    $('mobileRows').append(card);
-  }
-  $('issues').textContent = result.issues.length
-    ? result.issues
-        .map(i =>
-          [
-            i.page ? '第 ' + i.page + ' 頁' : '全檔',
-            i.line ? '第 ' + i.line + ' 行' : '',
-            reasonNames[i.code] || i.code,
-            i.detail
-          ]
-            .filter(Boolean)
-            .join(' · ')
-        )
-        .join('\n')
-    : '無全檔結構錯誤；仍需人工比對原始 PDF。';
-  $('textDetails').hidden = result.sourceType === 'excel';
-  $('rawText').textContent = '展開後顯示本機文字。';
-  $('textDetails').open = false;
-  exportsEnabled();
-}
-$('textDetails').addEventListener('toggle', () => {
-  if (!$('textDetails').open) {
-    $('rawText').textContent = '';
-    return;
-  }
-  if (!pages) return;
-  $('rawText').textContent = pages
-    .map(
-      p =>
-        '第 ' +
-        p.number +
-        ' 頁\n' +
-        groupLines(p.items)
-          .map(l => l.items.map(i => '[' + ((100 * i.x) / p.width).toFixed(1) + '%] ' + i.str).join(' | '))
-          .join('\n') +
-        (p.excludedItems?.length
-          ? '\n未納入表格的文字（請確認是否含交易）：\n' + p.excludedItems.map(i => i.str).join('\n')
-          : '')
-    )
-    .join('\n\n');
-});
-$('pdfForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  if (busy || ($('bank').value === 'ctbc' && !extractor)) return;
-  if ($('bank').value === 'esun' && !tableDraft) {
-    let secret = $('password').value;
-    $('password').value = '';
-    try {
-      await prepareExcel(secret);
-    } finally {
-      secret = '';
-    }
-    return;
-  }
-  const myRun = ++run;
-  discardPreview();
-  controller = new AbortController();
-  setBusy(true);
-  let password = $('password').value;
-  $('password').value = '';
-  let file = $('pdfFile').files[0],
-    digest = null,
-    documentHash = null;
+const storage = (() => {
   try {
-    if (!file || file.size === 0) throw new Error('EMPTY_FILE');
-    if (file.size > 25 * 1024 * 1024) throw new Error('FILE_TOO_LARGE');
-    const opening = $('opening').value.trim();
-    const openingCents = opening ? moneyCents(opening) : null;
-    if (opening && openingCents === null) throw new Error('INVALID_OPENING');
-    const isExcel = $('bank').value === 'esun';
-    const options = {
-      bank: $('bank').value,
-      order: $('order').value,
-      openingCents,
-      columns: isExcel ? null : columns()
-    };
-    status(isExcel ? '正在裝置內讀取 Excel…' : '正在裝置內解密與擷取文字…');
-    // Opaque hash is held in this page only, never sent or persisted.
-    digest = await file.arrayBuffer();
-    documentHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', digest)))
-      .map(x => x.toString(16).padStart(2, '0'))
-      .join('');
-    digest = null;
-    if (myRun !== run) return;
-    if (seenFiles.has(documentHash)) throw new Error('REPEATED_PDF');
-    if (isExcel) {
-      if (!/\.xlsx?$/i.test(file.name) || !tableDraft) throw Error('EXCEL_REQUIRED');
-      const mapping = {};
-      for (const field of TABLE_FIELDS) {
-        const value = $('excel-' + field).value;
-        if (value !== '') mapping[field] = Number(value);
-      }
-      result = parseEsunTable(tableDraft, {
-        mapping,
-        headerIndex: Number($('excelHeader').value),
-        order: options.order,
-        openingCents
-      });
-      result.document = { sourceType: 'excel', bytes: file.size, sheetName: tableDraft.sheetName };
-    } else {
-      const extracted = await extractor.extractLocalPdf(file, password, {
-        signal: controller.signal,
-        onProgress: (n, total) => {
-          if (myRun === run) status('本機擷取第 ' + n + '／' + total + ' 頁…');
-        }
-      });
-      password = '';
-      if (myRun !== run) {
-        extracted.pages.length = 0;
-        return;
-      }
-      pages = extracted.pages;
-      status('正在依文字座標解析並檢查餘額…');
-      result = applyExtractionWarnings(parseStatement(pages, options), pages);
-      result.document = { ...extracted.info, bytes: file.size };
-    }
-    markCrossFileDuplicates(result, seenTransactions, $('account').value.trim());
-    seenFiles.add(documentHash);
-    importContext = { fileHash: documentHash, order: options.order };
-    render();
-    location.hash = 'transactions';
-    updateRoute();
-    status(
-      result.transactions.length
-        ? '解析完成，請逐筆比對銀行原始檔案。'
-        : '檔案讀取完成，但未識別交易；請檢查銀行選擇及欄位位置。'
-    );
-    await cloud.savedImport();
-  } catch (error) {
-    if (myRun === run) {
-      discardPreview();
-      status(errorMessages[error.message] || '本機解析失敗。請檢查版本與檔案格式；未上傳檔案。');
-    }
-  } finally {
-    password = '';
-    digest = null;
-    file = null;
-    documentHash = null;
-    if (myRun === run) {
-      controller = null;
-      if ($('bank').value !== 'esun') $('pdfFile').value = '';
-      setBusy(false);
-    }
-  }
-});
-function download(type) {
-  if (!result || !$('confirmExport').checked || busy) return;
-  const content = type === 'csv' ? toCSV(result) : toJSON(result);
-  const blob = new Blob([content], {
-    type: type === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8'
-  });
-  const url = URL.createObjectURL(blob);
-  urls.add(url);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'finance-preview.' + type;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-    urls.delete(url);
-  }, 30000);
-}
-$('csv').addEventListener('click', () => download('csv'));
-$('json').addEventListener('click', () => download('json'));
-$('confirmExport').addEventListener('change', exportsEnabled);
-$('clear').addEventListener('click', clearAll);
-$('pdfFile').addEventListener('change', () => {
-  if ($('bank').value === 'esun') {
-    $('password').value = '';
-    void prepareExcel();
-    return;
-  }
-  discardPreview();
-  $('password').value = '';
-  status('已選檔。請輸入密碼後開始本機解析。');
-});
-window.addEventListener('pagehide', clearAll);
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) $('password').value = '';
-});
-$('clearData').addEventListener('click', () => {
-  clearAll();
-  $('settingsNotice').textContent = '已清除本次 PDF 與交易預覽。';
-});
-$('clearCache').addEventListener('click', async () => {
-  $('clearCache').disabled = true;
-  clearAll();
-  try {
-    await clearPublicCache();
-    $('settingsNotice').textContent = '公開程式快取已清除。請關閉所有本 App 視窗後再開啟。';
+    return window.localStorage;
   } catch {
-    $('settingsNotice').textContent = '無法清除，請使用瀏覽器網站資料設定。';
-  } finally {
-    $('clearCache').disabled = false;
+    return null;
   }
-});
-updateRoute();
-void initPwa();
-async function start() {
-  try {
-    if (location.protocol === 'file:') throw new Error('HTTP_REQUIRED');
-    extractor = await import('../pdf-parser/extract.mjs');
-    $('runtime').textContent =
-      'PDF.js ' + extractor.PDFJS_VERSION + ' · 相容版程式 · 專屬本機 Worker · 無 Google 授權';
-    setBusy(false);
-    status('工具已就緒。選擇 PDF 並輸入開啟密碼。');
-  } catch {
-    $('runtime').textContent = '程式尚未載入。';
-    status(
-      location.protocol === 'file:'
-        ? '請用隨附的啟動工具或 GitHub Pages 開啟，不能直接雙擊 HTML。'
-        : 'PDF.js 載入失敗。請確認完整解壓、靜態資源路徑、瀏覽器版本與 CSP。'
-    );
+})();
+const local = new CashLocal(storage);
+const store = new CashStore();
+let remembered = rememberedAccount(storage),
+  syncing = false,
+  syncAgain = false,
+  syncTimer = 0,
+  lastError = '',
+  editing = null,
+  month = '',
+  askedCash = false;
+
+const messages = {
+  CASH_DATE: '請選擇日期。',
+  CASH_TIME: '時間格式不正確，可以留空。',
+  CASH_AMOUNT: '請填寫大於 0 的金額，最多到小數點後兩位。',
+  CASH_CATEGORY: '請選一個分類。',
+  CASH_EXPRESSION: '金額算式看不懂，只支援數字與 + −。',
+  GOOGLE_NETWORK: '連不上 Google，記帳已先存在這台裝置，有網路時再同步。',
+  GOOGLE_PERMISSION: 'Google 沒有給予存取權限，請重新連接並允許存取。',
+  GOOGLE_POPUP: 'Google 授權視窗沒有完成；若是 Safari，請允許彈出視窗後再試。',
+  GOOGLE_NOT_READY: 'Google 元件還在載入，請再按一次。',
+  GOOGLE_CONFIG: '網站尚未設定 Google 連接。',
+  GOOGLE_LOGIN_REQUIRED: 'Google 授權已過期，按右上角重新連接即可同步。',
+  GOOGLE_API: 'Google 試算表暫時無法寫入，記帳已先存在這台裝置。',
+  SHEET_SCHEMA: '試算表「異動紀錄」的欄位被改動過，請還原第一列的欄名。'
+};
+const pad = n => String(n).padStart(2, '0');
+const today = () => {
+  const d = new Date();
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+};
+const shiftDay = (date, days) => {
+  const d = new Date(date + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+};
+const shiftMonth = (m, by) => {
+  let y = +m.slice(0, 4),
+    mm = +m.slice(5, 7) + by;
+  while (mm < 1) ((mm += 12), y--);
+  while (mm > 12) ((mm -= 12), y++);
+  return y + '-' + pad(mm);
+};
+const signedYuan = c => (c < 0 ? '−' : '') + yuan(Math.abs(c));
+
+// ---------- Home ----------
+function drawHome() {
+  const setting = local.setting,
+    entries = local.entries;
+  const cash = cashNow(entries, setting);
+  $('cashNow').textContent = signedYuan(cash);
+  $('cashNow').classList.toggle('out', cash < 0);
+  $('cashAnchor').textContent = setting
+    ? '從 ' + setting.date.replaceAll('-', '/') + ' 00:00 的 ' + yuan(setting.cents) + ' 起算'
+    : '還沒設定起始現金';
+  $('welcome').hidden = !!setting || store.connected || entries.length > 0;
+  const m = monthSummary(entries, month);
+  $('monthLabel').textContent = month.slice(0, 4) + ' 年 ' + +month.slice(5) + ' 月';
+  const thisMonth = month === today().slice(0, 7);
+  $('monthExpense').textContent = yuan(m.expenseCents);
+  $('monthIncome').textContent = yuan(m.incomeCents);
+  $('monthExpense').previousElementSibling.textContent =
+    (thisMonth ? '本月' : +month.slice(5) + ' 月') + '支出';
+  $('monthIncome').previousElementSibling.textContent =
+    (thisMonth ? '本月' : +month.slice(5) + ' 月') + '收入';
+  // Spending by category as one thin stacked bar with labels underneath.
+  const box = $('monthBreakdown');
+  box.replaceChildren();
+  if (m.byCategory.length) {
+    const bar = document.createElement('div');
+    bar.className = 'stack';
+    const legend = document.createElement('div');
+    legend.className = 'stack-legend';
+    for (const c of m.byCategory) {
+      const seg = document.createElement('span');
+      seg.style.width = ((100 * c.cents) / m.expenseCents).toFixed(2) + '%';
+      seg.style.background = CATEGORY_COLORS[c.name] || '#8b8f96';
+      seg.title = c.name + ' ' + yuan(c.cents);
+      bar.append(seg);
+      const item = document.createElement('span');
+      const dot = document.createElement('i');
+      dot.style.background = seg.style.background;
+      item.append(dot, iconOf(c.name) + ' ' + c.name + ' ' + yuan(c.cents));
+      legend.append(item);
+    }
+    const extra = [];
+    if (m.withdrawCents) extra.push('提款 ' + yuan(m.withdrawCents));
+    if (m.depositCents) extra.push('存入 ' + yuan(m.depositCents));
+    if (extra.length) {
+      const item = document.createElement('span');
+      item.className = 'muted';
+      item.textContent = extra.join('・');
+      legend.append(item);
+    }
+    box.append(bar, legend);
+  }
+  const rows = ledger(entries, setting)
+    .filter(e => e.date.slice(0, 7) === month)
+    .reverse();
+  const list = $('entryList');
+  list.replaceChildren();
+  $('listEmpty').hidden = rows.length > 0;
+  const pending = new Set(local.state.pending);
+  for (const g of groupByDay(
+    rows,
+    e => e.date,
+    e => (e.type === '支出' || e.type === '收入' ? e.flowCents : 0)
+  )) {
+    list.append(dayHeader(g.date, g.cents));
+    for (const e of g.items) {
+      const transfer = e.type === '提款' || e.type === '存入';
+      list.append(
+        row({
+          category: transfer ? '' : e.category,
+          icon: e.type === '提款' ? '🏧' : e.type === '存入' ? '🏦' : undefined,
+          tint: transfer ? '#8b8f96' : undefined,
+          title: transfer ? e.type + (e.party ? '　' + e.party : '') : e.category.split('／').pop(),
+          sub:
+            [transfer ? '' : e.party, e.note].filter(Boolean).join('－') ||
+            (transfer ? '現金 ' + (e.type === '提款' ? '增加' : '減少') : ''),
+          cents: e.flowCents,
+          side: (pending.has(e.id) ? '⏳ ' : '') + '餘 ' + signedYuan(e.balanceCents),
+          dim: transfer,
+          onClick: () => openEditor(e)
+        })
+      );
+    }
   }
 }
 
-const excelNames = {
-  date: '日期（必要）',
-  time: '時間（可留空）',
-  summary: '摘要（必要）',
-  expense: '提款／支出（必要）',
-  income: '存入／收入（必要）',
-  balance: '餘額（必要）',
-  fee: '獨立手續費（可留空）',
-  note: '備註（可留空）'
-};
-function fillExcelMapping() {
-  if (!tableDraft) return;
-  const cells = tableDraft.rows[Number($('excelHeader').value)]?.cells || [];
-  $('excelMapping').replaceChildren();
-  const detected = inspectTable([{ cells, line: 1 }]).mapping;
-  for (const field of TABLE_FIELDS) {
-    const label = document.createElement('label');
-    label.textContent = excelNames[field];
-    const select = document.createElement('select');
-    select.id = 'excel-' + field;
-    const empty = document.createElement('option');
-    empty.value = '';
-    empty.textContent = '未對應';
-    select.append(empty);
-    cells.forEach((name, i) => {
-      const o = document.createElement('option');
-      o.value = String(i);
-      o.textContent = i + 1 + '：' + name;
-      select.append(o);
-    });
-    if (detected[field] != null) select.value = String(detected[field]);
-    label.append(select);
-    $('excelMapping').append(label);
-  }
+// ---------- Entry form ----------
+let type = '支出',
+  category = '';
+function setType(t) {
+  type = t;
+  for (const b of document.querySelectorAll('.type-tab'))
+    b.setAttribute('aria-selected', String(b.dataset.type === t));
+  const transfer = t === '提款' || t === '存入';
+  $('categoryButton').hidden = transfer;
+  $('partyLabel').textContent = transfer ? '銀行／帳戶' : '對象／商店';
+  $('typeHint').hidden = !transfer;
+  $('typeHint').textContent =
+    t === '提款'
+      ? '從銀行領出現金：現金增加，但不算收入。'
+      : t === '存入'
+        ? '把現金存回銀行：現金減少，但不算支出。'
+        : '';
+  if (transfer) showPicker(false);
+  drawCategories();
 }
-function selectExcelSheet() {
-  discardPreview();
-  const sheet = excelBook?.sheets[Number($('excelSheet').value)];
-  if (!sheet) return;
-  tableDraft = { ...inspectTable(sheet.rows), date1904: excelBook.date1904, sheetName: sheet.name };
-  $('excelHeader').replaceChildren();
-  tableDraft.rows.slice(0, 30).forEach((r, i) => {
-    const o = document.createElement('option');
-    o.value = String(i);
-    o.textContent = '第 ' + r.line + ' 列：' + r.cells.join(' ／ ').slice(0, 100);
-    $('excelHeader').append(o);
-  });
-  $('excelHeader').value = String(tableDraft.headerIndex);
-  fillExcelMapping();
-  $('parse').textContent = '核對欄位並解析 Excel';
-  $('excelInfo').textContent =
-    'Excel 已在本機讀取；請確認工作表、表頭及欄位對應，再點「本機讀取並解析 Excel」。';
-  setBusy(false);
+function setCategory(c) {
+  category = c || '';
+  $('categoryIcon').textContent = category ? iconOf(category) : '＋';
+  $('categoryName').textContent = category ? category.replace('／', ' · ') : '選分類';
+  drawCategories();
 }
-async function prepareExcel(password = '') {
-  controller?.abort();
-  $('parse').textContent = '本機解密並讀取 Excel';
-  const generation = ++run;
-  discardPreview();
-  tableDraft = null;
-  excelBook = null;
-  $('password').value = '';
-  $('excelMapping').replaceChildren();
-  $('excelHeader').replaceChildren();
-  $('excelSheet').replaceChildren();
-  $('excelInfo').textContent = '';
-  const file = $('pdfFile').files[0];
-  if (!file) {
-    setBusy(false);
-    return;
+function showPicker(open) {
+  $('categoryPicker').hidden = !open;
+  $('categoryButton').setAttribute('aria-expanded', String(open));
+}
+function drawCategories() {
+  const groups = type === '收入' ? CATEGORY_TREE.收入 : CATEGORY_TREE.支出;
+  const grid = $('categoryGrid'),
+    subs = $('subGrid');
+  grid.replaceChildren();
+  subs.replaceChildren();
+  const main = category.split('／')[0];
+  for (const c of groups) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'category-tile' + (main === c.name ? ' on' : '');
+    const icon = document.createElement('span');
+    icon.className = 'icon';
+    icon.textContent = c.icon;
+    b.append(icon, c.name);
+    b.addEventListener('click', () => setCategory(c.name));
+    grid.append(b);
   }
-  controller = new AbortController();
-  setBusy(true);
-  status('正在裝置內讀取 Excel…');
-  try {
-    if (!/\.xlsx?$/i.test(file.name)) throw Error('EXCEL_REQUIRED');
-    const book = await readLocalExcel(file, { signal: controller.signal, password });
-    if (generation !== run) return;
-    excelBook = book;
-    book.sheets.forEach((s, i) => {
-      const o = document.createElement('option');
-      o.value = String(i);
-      o.textContent = s.name;
-      $('excelSheet').append(o);
-    });
-    // Select the sheet with the best matching header; every choice stays visible.
-    let best = 0,
-      score = -1;
-    book.sheets.forEach((s, i) => {
-      const found = inspectTable(s.rows);
-      if (found.score > score) {
-        best = i;
-        score = found.score;
+  const group = groups.find(c => c.name === main);
+  if (group)
+    for (const sub of group.subs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const full = group.name + '／' + sub;
+      b.className = 'sub-chip' + (category === full ? ' on' : '');
+      b.textContent = sub;
+      b.addEventListener('click', () => {
+        setCategory(category === full ? group.name : full);
+        showPicker(false);
+      });
+      subs.append(b);
+    }
+}
+export function evaluateAmount(text) {
+  const t = String(text).replace(/\s+/g, '').replace(/[−－]/g, '-').replace(/＋/g, '+').replace(/,/g, '');
+  if (!t) return '';
+  if (!/^\d+(\.\d{1,2})?([+-]\d+(\.\d{1,2})?)*$/.test(t)) throw Error('CASH_EXPRESSION');
+  let cents = 0;
+  for (const part of t.match(/[+-]?\d+(\.\d{1,2})?/g))
+    cents += (part.startsWith('-') ? -1 : 1) * parseCents(part.replace(/^[+-]/, ''));
+  return (cents / 100)
+    .toFixed(2)
+    .replace(/\.00$/, '')
+    .replace(/(\.\d)0$/, '$1');
+}
+function keypad() {
+  const box = $('keypad');
+  for (const key of ['7', '8', '9', '⌫', '4', '5', '6', '+', '1', '2', '3', '−', '00', '0', '.', '=']) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = key;
+    b.className = 'key' + (/[⌫+−=]/.test(key) ? ' op' : '');
+    b.addEventListener('click', () => {
+      const input = $('amount');
+      try {
+        if (key === '⌫') input.value = input.value.slice(0, -1);
+        else if (key === '=') input.value = evaluateAmount(input.value);
+        else input.value += key === '−' ? '-' : key;
+        $('formStatus').textContent = '';
+      } catch (error) {
+        $('formStatus').textContent = messages[error.message];
       }
     });
-    $('excelSheet').value = String(best);
-    selectExcelSheet();
-    status('Excel 已在本機讀取，請確認欄位對應。');
-  } catch (error) {
-    if (generation === run) {
-      tableDraft = null;
-      excelBook = null;
-      status(errorMessages[error.message] || 'Excel 無法讀取，請確認檔案格式。');
-    }
-  } finally {
-    password = '';
-    if (generation === run) {
-      controller = null;
-      setBusy(false);
-    }
+    box.append(b);
   }
 }
-function updateSource() {
-  const excel = $('bank').value === 'esun';
-  $('passwordField').hidden = false;
-  $('passwordLabel').textContent = excel ? 'Excel 開啟密碼（有加密才需填）' : 'PDF 開啟密碼';
-  $('password').placeholder = excel ? '選檔後輸入；只在本機解密' : '僅供本次記憶體內解密';
-  $('pdfColumns').hidden = excel;
-  $('excelOptions').hidden = !excel;
-  $('fileLabel').textContent = excel ? '玉山銀行 Excel' : '中信銀行 PDF';
-  $('pdfFile').accept = excel
-    ? '.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    : '.pdf,application/pdf';
-  $('parse').textContent = excel
-    ? tableDraft
-      ? '核對欄位並解析 Excel'
-      : '本機解密並讀取 Excel'
-    : '本機解密並解析';
-  setBusy(false);
+function fillForm(e = null) {
+  editing = e;
+  setType(e?.type || '支出');
+  setCategory(e?.category || '');
+  showPicker(!e && type === '支出');
+  $('amount').value = e ? String(e.amountCents / 100) : '';
+  $('date').value = e?.date || today();
+  $('time').value = e?.time || '';
+  $('party').value = e?.party || '';
+  $('note').value = e?.note || '';
+  $('saveEntry').textContent = e ? '儲存修改' : '儲存';
+  $('deleteEntry').hidden = $('cancelEdit').hidden = !e;
+  $('formContext').hidden = !e;
+  $('formContext').textContent = e ? '正在修改 ' + e.date.replaceAll('-', '/') + ' 的記帳。' : '';
 }
-$('bank').addEventListener('change', () => {
-  clearAll();
-  updateSource();
-  $('order').value = $('bank').value === 'esun' ? 'descending' : 'ascending';
-  status(
-    $('bank').value === 'esun' ? '請選玉山銀行匯出的 Excel，再確認欄位。' : '請選中信 PDF，最後輸入密碼。'
-  );
-});
-$('excelSheet').addEventListener('change', selectExcelSheet);
-$('excelHeader').addEventListener('change', fillExcelMapping);
-const cloud = initCloud({
-  getPayload: () =>
-    result && importContext ? { result, context: importContext, account: $('account').value.trim() } : null
-});
-updateSource();
-void start();
+function openEditor(e) {
+  fillForm(e);
+  $('formStatus').textContent = '';
+  location.hash = '#add';
+}
+function saveForm(ev) {
+  ev.preventDefault();
+  let entry;
+  try {
+    $('amount').value = evaluateAmount($('amount').value);
+    const now = new Date().toISOString();
+    entry = makeEntry({
+      id: editing?.id || crypto.randomUUID(),
+      type,
+      date: $('date').value,
+      time: $('time').value,
+      amount: $('amount').value,
+      category,
+      party: $('party').value,
+      note: $('note').value,
+      createdAt: editing?.createdAt || now,
+      updatedAt: now
+    });
+  } catch (error) {
+    $('formStatus').textContent = messages[error.message] || '請檢查填寫的內容。';
+    if (error.message === 'CASH_CATEGORY') showPicker(true);
+    return;
+  }
+  const saved = local.put(entry);
+  const label = (entry.category.split('／').pop() || entry.type) + ' ' + yuan(entry.amountCents);
+  const was = editing;
+  fillForm();
+  month = entry.date.slice(0, 7);
+  $('formStatus').textContent = saved
+    ? (was ? '已修改：' : '已記下：') + label + (store.connected ? '，正在同步…' : '。')
+    : '這台裝置無法儲存（可能是私密瀏覽），請連接 Google 後再記。';
+  refresh();
+  queueSync();
+  if (was) location.hash = '#home';
+}
 
-initStocks(cloud);
-initCards(cloud);
-initInvoices(cloud);
-initMatching(cloud);
-initLinePay(cloud);
-initManual(cloud);
-setHistoryCloud(cloud);
-initAccountsView(cloud);
-initRecurring(cloud);
-initReports(cloud);
-// Long explanations stay folded behind a ？ next to the page title.
-for (const view of document.querySelectorAll('[data-route]')) {
-  const title = view.querySelector('.route-title');
-  if (!title || !view.querySelector('.help')) continue;
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'help-toggle';
-  b.textContent = '?';
-  b.setAttribute('aria-label', '說明');
-  b.setAttribute('aria-expanded', 'false');
-  b.addEventListener('click', () => {
-    const open = view.classList.toggle('show-help');
-    b.setAttribute('aria-expanded', String(open));
-  });
-  title.append(b);
+// ---------- Cash setting ----------
+function setCash(text, statusId) {
+  const cents = parseCents(text);
+  if (!Number.isSafeInteger(cents)) {
+    $(statusId).textContent = '請填寫 0 以上的金額，最多到小數點後兩位。';
+    return false;
+  }
+  local.setSetting(cents, today());
+  $(statusId).textContent =
+    '已設定：' + today().replaceAll('-', '/') + ' 00:00 現金 ' + yuan(cents) + ' 元。';
+  refresh();
+  queueSync();
+  return true;
 }
-document.addEventListener('click', e => {
-  const menu = document.querySelector('.topmenu');
-  if (menu?.open && !menu.contains(e.target)) menu.removeAttribute('open');
-});
+function askCash() {
+  const dialog = $('cashDialog');
+  if (askedCash || local.setting || dialog.open) return;
+  askedCash = true;
+  $('cashDialogDate').textContent = today().replaceAll('-', '/') + ' 00:00';
+  $('cashDialogAmount').value = '';
+  $('cashDialogStatus').textContent = '';
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
+}
+
+// ---------- Google ----------
+function syncLabel() {
+  const n = local.pendingCount;
+  if (syncing) return '同步中…';
+  if (!store.connected)
+    return n ? n + ' 筆待同步' : remembered || local.state.lastSync ? '點此連接' : '未連接';
+  if (lastError) return '同步失敗';
+  return n ? n + ' 筆待同步' : '已同步';
+}
+function drawStatus() {
+  $('syncChip').textContent = syncLabel();
+  $('syncChip').dataset.state = syncing
+    ? 'busy'
+    : !store.connected
+      ? 'off'
+      : lastError || local.pendingCount
+        ? 'warn'
+        : 'ok';
+  $('connectButton').textContent = store.connected
+    ? '登出'
+    : remembered
+      ? '以 ' + remembered + ' 連接'
+      : '連接 Google';
+  $('syncButton').hidden = !store.connected;
+  $('switchButton').hidden = !store.connected && !remembered;
+  $('accountLine').textContent = store.connected
+    ? '已連接：' + (store.user?.emailAddress || '')
+    : '尚未連接。記帳會先存在這台裝置。';
+  const last = local.state.lastSync;
+  $('syncLine').textContent =
+    (last ? '上次同步：' + new Date(last).toLocaleString('zh-TW', { hour12: false }) : '還沒同步過') +
+    (local.pendingCount ? '；' + local.pendingCount + ' 筆待同步' : '') +
+    (lastError ? '。' + lastError : '');
+  const link = local.state.fileId
+    ? 'https://docs.google.com/spreadsheets/d/' + local.state.fileId + '/edit'
+    : '';
+  $('sheetLink').hidden = !link;
+  if (link) $('sheetLink').href = link;
+  const s = local.setting;
+  $('settingLine').textContent = s
+    ? s.date.replaceAll('-', '/') +
+      ' 00:00 設定為 ' +
+      yuan(s.cents) +
+      ' 元；目前算出 ' +
+      signedYuan(cashNow(local.entries, s)) +
+      ' 元。'
+    : '還沒設定。';
+}
+async function connect({ chooser = false } = {}) {
+  if (syncing) return;
+  try {
+    await loadGis();
+  } catch {
+    lastError = messages.GOOGLE_NETWORK;
+    drawStatus();
+    return;
+  }
+  try {
+    const token = await requestToken({ scope: SCOPE, hint: remembered, chooser });
+    store.authorize(token.access_token, token.expires_in);
+    const user = await store.profile();
+    remembered = user.emailAddress || '';
+    rememberAccount(storage, remembered);
+    await store.open(local.state.fileId);
+    local.state.fileId = store.file.id;
+    local.save();
+    lastError = '';
+    await sync();
+    if (store.connected && !local.setting) askCash();
+  } catch (error) {
+    lastError = messages[error.message] || 'Google 連接失敗。';
+    if (error.message === 'GOOGLE_PERMISSION' || error.message === 'GOOGLE_API') store.disconnect();
+    drawStatus();
+  }
+}
+async function sync() {
+  if (!store.connected || !store.file) return;
+  if (syncing) {
+    syncAgain = true;
+    return;
+  }
+  syncing = true;
+  drawStatus();
+  try {
+    const result = await store.sync(local.map, local.setting);
+    local.synced({ entries: result.entries, setting: result.setting, fileId: result.fileId });
+    lastError = '';
+  } catch (error) {
+    lastError = messages[error.message] || '同步失敗，記帳已先存在這台裝置。';
+  } finally {
+    syncing = false;
+    refresh();
+  }
+  if (syncAgain) {
+    syncAgain = false;
+    await sync();
+  }
+}
+function queueSync() {
+  clearTimeout(syncTimer);
+  if (store.connected) syncTimer = setTimeout(sync, 800);
+}
+function logout() {
+  store.disconnect();
+  lastError = '';
+  refresh();
+}
+
+// ---------- Routing ----------
+function route() {
+  const name = (location.hash || '#home').slice(1);
+  const known = ['home', 'add', 'settings'].includes(name) ? name : 'home';
+  for (const v of document.querySelectorAll('[data-route]')) v.hidden = v.dataset.route !== known;
+  for (const a of document.querySelectorAll('[data-nav]'))
+    if (a.dataset.nav === known) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  if (known === 'add' && !editing) $('date').value ||= today();
+  if (known !== 'add' && editing) fillForm();
+  if (known === 'settings') void loadGis().catch(() => {});
+  window.scrollTo(0, 0);
+}
+function refresh() {
+  drawHome();
+  drawStatus();
+}
+
+// ---------- Start ----------
+function init() {
+  month = today().slice(0, 7);
+  keypad();
+  for (const b of document.querySelectorAll('.type-tab'))
+    b.addEventListener('click', () => {
+      setType(b.dataset.type);
+      setCategory('');
+      showPicker(b.dataset.type === '支出' || b.dataset.type === '收入');
+    });
+  $('categoryButton').addEventListener('click', () => showPicker($('categoryPicker').hidden));
+  $('prevDay').addEventListener('click', () => ($('date').value = shiftDay($('date').value || today(), -1)));
+  $('nextDay').addEventListener('click', () => ($('date').value = shiftDay($('date').value || today(), 1)));
+  $('entryForm').addEventListener('submit', saveForm);
+  $('cancelEdit').addEventListener('click', () => {
+    fillForm();
+    location.hash = '#home';
+  });
+  $('deleteEntry').addEventListener('click', () => {
+    if (!editing) return;
+    const e = editing;
+    local.remove(e);
+    fillForm();
+    $('formStatus').textContent =
+      '已刪除：' + (e.category.split('／').pop() || e.type) + ' ' + yuan(e.amountCents) + '。';
+    refresh();
+    queueSync();
+    location.hash = '#home';
+  });
+  $('prevMonth').addEventListener('click', () => {
+    month = shiftMonth(month, -1);
+    drawHome();
+  });
+  $('nextMonth').addEventListener('click', () => {
+    month = shiftMonth(month, 1);
+    drawHome();
+  });
+  $('syncChip').addEventListener('click', () => (store.connected ? sync() : connect()));
+  $('connectButton').addEventListener('click', () => (store.connected ? logout() : connect()));
+  $('switchButton').addEventListener('click', () => {
+    logout();
+    void connect({ chooser: true });
+  });
+  $('syncButton').addEventListener('click', () => sync());
+  $('welcomeConnect').addEventListener('click', () => connect());
+  $('welcomeLocal').addEventListener('click', () => {
+    askedCash = false;
+    askCash();
+  });
+  $('settingForm').addEventListener('submit', e => {
+    e.preventDefault();
+    if (setCash($('settingAmount').value, 'settingStatus')) $('settingAmount').value = '';
+  });
+  $('cashDialogForm').addEventListener('submit', e => {
+    e.preventDefault();
+    if (setCash($('cashDialogAmount').value, 'cashDialogStatus')) $('cashDialog').close?.();
+  });
+  $('cashDialogLater').addEventListener('click', () => $('cashDialog').close?.());
+  let confirmClear = false;
+  $('clearLocal').addEventListener('click', () => {
+    if (!confirmClear) {
+      confirmClear = true;
+      $('localStatus').textContent =
+        (local.pendingCount
+          ? '還有 ' + local.pendingCount + ' 筆沒同步，清除後會遺失。'
+          : '試算表裡的資料不受影響。') + '確定要清除請再按一次。';
+      return;
+    }
+    confirmClear = false;
+    local.clear();
+    $('localStatus').textContent = '已清除這台裝置的記帳。';
+    refresh();
+  });
+  // Coming back to the app: sync whatever was recorded while away.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && local.pendingCount) queueSync();
+  });
+  window.addEventListener('online', queueSync);
+  window.addEventListener('hashchange', route);
+  fillForm();
+  route();
+  refresh();
+  if (!local.ok) $('localStatus').textContent = '這個瀏覽器不允許儲存資料，記帳要連上 Google 才保得住。';
+  void initPwa();
+}
+init();
