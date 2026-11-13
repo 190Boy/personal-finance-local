@@ -816,3 +816,12 @@ input[type='month']::-webkit-date-and-time-value {
 .notice[data-kind='ok'] {
   border-left-color: var(--good);
 }
+/* Six channels and ＋ do not fit one phone line: wrap so none is hidden off-screen. */
+#channelRow {
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: 6px;
+}
+#channelRow .chip {
+  padding: 3px 11px;
+}

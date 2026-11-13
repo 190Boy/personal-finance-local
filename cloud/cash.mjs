@@ -6,7 +6,7 @@ export const TYPES = ['支出', '收入', '提款', '存入'];
 export const SIGN = { 支出: -1, 收入: 1, 提款: 1, 存入: -1 };
 // 渠道：錢從哪裡付、進到哪裡。只有「現金」會影響現金餘額；其他渠道是給 BOT 對帳用的參考紀錄。
 export const CASH = '現金';
-export const DEFAULT_CHANNELS = [CASH, '銀行', '信用卡', 'LINE Pay'];
+export const DEFAULT_CHANNELS = [CASH, '玉山銀行', '中信銀行', '凱基信用卡', '中信信用卡', 'LINE Pay'];
 
 export const LOG_SHEET = '異動紀錄';
 export const LOG_HEADERS = [
@@ -52,8 +52,8 @@ export const MONTH_HEADERS = [
   '筆數',
   '月底現金（元）'
 ];
-// 試算表欄位或資料意義有變時加 1，並同步更新 BOT 說明書（見 README）。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）；3 = v1.2.0 起（記帳明細可直接打字）。
-export const SCHEMA_VERSION = 3;
+// 試算表欄位或資料意義有變時加 1，並同步更新 BOT 說明書（見 README）。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）；3 = v1.2.0 起（記帳明細可直接打字）；4 = v1.3.0 起（預設渠道指定銀行與信用卡）。
+export const SCHEMA_VERSION = 4;
 export const SETTING_SHEET = '設定';
 export const SETTING_HEADERS = ['項目', '內容', '說明'];
 // 自己新增的渠道、分類、子分類。種類：渠道／支出分類／收入分類；子分類的「上層」填主分類名稱。

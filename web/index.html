@@ -18,7 +18,7 @@
 </head>
 <body>
 <a class="skip" href="#main">跳到主要內容</a>
-<header class="topbar"><div class="wrap topbar-in"><img src="./icons/icon-192.png" alt="" width="28" height="28"><strong>現金記帳</strong><span class="version" id="appVersion">v1.2.0</span><button id="syncChip" class="sync-chip" type="button" aria-live="polite">未連接</button></div></header>
+<header class="topbar"><div class="wrap topbar-in"><img src="./icons/icon-192.png" alt="" width="28" height="28"><strong>現金記帳</strong><span class="version" id="appVersion">v1.3.0</span><button id="syncChip" class="sync-chip" type="button" aria-live="polite">未連接</button></div></header>
 <main id="main" class="wrap">
 
 <section id="view-home" data-route="home" hidden>
@@ -54,9 +54,9 @@
 <h1>設定</h1>
 <section class="card"><h2>Google 與試算表</h2><p id="accountLine" class="muted">尚未連接。</p><p id="syncLine" class="muted"></p><div class="actions"><button id="connectButton" type="button">連接 Google</button><button id="syncButton" type="button" class="secondary" hidden>立即同步</button><button id="switchButton" type="button" class="secondary" hidden>切換帳號</button></div><p><a id="sheetLink" target="_blank" rel="noopener noreferrer" hidden>開啟「現金記帳」試算表</a></p><details class="fold"><summary>試算表裡有什麼</summary><ul class="small"><li><b>記帳明細</b>：一列一筆，已是最新狀態，含渠道與「記帳後現金」（只算現金）。BOT 讀這張就好。</li><li><b>月份統計</b>：每月每個渠道的支出、收入、提款、存入，現金另有月底現金。</li><li><b>設定</b>：起始現金與日期、目前現金。</li><li><b>選項</b>：你自己新增的渠道、分類與子分類。</li><li><b>異動紀錄</b>：每次新增、修改、刪除各一列，用來在多台裝置之間合併，請勿手動編輯。</li></ul><p class="small muted">網站只用 drive.file 權限，只看得到它自己建立的這份試算表。</p></details></section>
 <section class="card"><h2>目前現金</h2><p id="settingLine" class="muted"></p><form id="settingForm" class="inline-form"><label class="field">現在身上的現金（元）<input id="settingAmount" inputmode="decimal" autocomplete="off" placeholder="例如 3500"></label><button type="submit">設定</button></form><p class="small muted">會記成今天 00:00 的金額。今天起的記帳往後加減，之前的往回推。今天已經記過的花費，請填今天一開始身上的錢。</p><p id="settingStatus" class="status" role="status" aria-live="polite"></p></section>
-<section class="card"><h2>渠道與分類</h2><p class="small muted">現金、銀行、信用卡、LINE Pay 是預設渠道，只有「現金」會算進目前現金；其他渠道的記帳是給 BOT 對帳用的參考。自己的分類和子分類，可以在記一筆的分類裡按「＋ 新增」加入。</p><form id="channelForm" class="inline-form"><label class="field">新增渠道<input id="channelName" maxlength="20" autocomplete="off" placeholder="例如 悠遊卡、玉山銀行"></label><button type="submit">新增</button></form><div id="ownOptions" class="own-options"></div><p id="optionStatus" class="status" role="status" aria-live="polite"></p></section>
+<section class="card"><h2>渠道與分類</h2><p class="small muted">現金、玉山銀行、中信銀行、凱基信用卡、中信信用卡、LINE Pay 是預設渠道，只有「現金」會算進目前現金；其他渠道的記帳是給 BOT 對帳用的參考。自己的分類和子分類，可以在記一筆的分類裡按「＋ 新增」加入。</p><form id="channelForm" class="inline-form"><label class="field">新增渠道<input id="channelName" maxlength="20" autocomplete="off" placeholder="例如 悠遊卡、街口支付"></label><button type="submit">新增</button></form><div id="ownOptions" class="own-options"></div><p id="optionStatus" class="status" role="status" aria-live="polite"></p></section>
 <section class="card"><h2>這台裝置</h2><p class="small muted">記帳會先存在這台裝置，連上 Google 後再同步，所以沒網路也能記。登出不會刪除這裡的記帳。</p><div class="actions"><button id="clearLocal" type="button" class="secondary danger">清除這台裝置的記帳</button><button id="installApp" type="button" class="secondary" hidden>加入主畫面</button></div><p id="localStatus" class="status" role="status" aria-live="polite"></p><p id="pwaStatus" class="small muted"></p></section>
-<p class="small muted">v1.2.0 · 以現金記帳為主，其他渠道供對帳參考。銀行、信用卡、股票等可匯出檔案的資料交給 BOT 整理。先前的完整版保存在 GitHub 的 backup/full-v0.16.1 分支。</p>
+<p class="small muted">v1.3.0 · 以現金記帳為主，其他渠道供對帳參考。銀行、信用卡、股票等可匯出檔案的資料交給 BOT 整理。先前的完整版保存在 GitHub 的 backup/full-v0.16.1 分支。</p>
 </section>
 </main>
 

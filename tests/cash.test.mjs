@@ -137,7 +137,7 @@ test('the newer version of a record or setting wins in either direction', () => 
     settingRows(setting, 0)
       .find(r => r[0] === '資料格式版本')
       .slice(0, 2),
-    ['資料格式版本', 3]
+    ['資料格式版本', 4]
   );
 });
 
@@ -341,8 +341,33 @@ test('your own channels and categories merge by last change and add to the built
   );
   const removed = makeOption({ kind: '渠道', name: '悠遊卡', deleted: true, updatedAt: at(2) });
   const merged = mergeOptions(local, new Map([[optionKey(removed), removed]]));
-  assert.deepEqual(channelList(merged), ['現金', '銀行', '信用卡', 'LINE Pay']);
-  assert.deepEqual(channelList(local), ['現金', '銀行', '信用卡', 'LINE Pay', '悠遊卡']);
+  assert.deepEqual(channelList(merged), [
+    '現金',
+    '玉山銀行',
+    '中信銀行',
+    '凱基信用卡',
+    '中信信用卡',
+    'LINE Pay'
+  ]);
+  assert.deepEqual(channelList(local), [
+    '現金',
+    '玉山銀行',
+    '中信銀行',
+    '凱基信用卡',
+    '中信信用卡',
+    'LINE Pay',
+    '悠遊卡'
+  ]);
+  // A channel you added yourself that is now a default appears once.
+  const dup = makeOption({ kind: '渠道', name: '玉山銀行' });
+  assert.deepEqual(channelList(new Map([[optionKey(dup), dup]])), [
+    '現金',
+    '玉山銀行',
+    '中信銀行',
+    '凱基信用卡',
+    '中信信用卡',
+    'LINE Pay'
+  ]);
   const spend = categoryTree(CATEGORY_TREE.支出, merged, '支出');
   const pet = spend.find(c => c.name === '寵物');
   assert.deepEqual([pet.icon, pet.subs, pet.own], ['🐶', ['飼料'], true]);
