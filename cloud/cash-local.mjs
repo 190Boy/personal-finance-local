@@ -1,15 +1,16 @@
 // 先存手機：每一筆記帳都先寫進這台裝置，連上 Google 時再同步到試算表。
-// 只存記帳、現金設定與自訂的渠道／分類；Google 授權 Token 從不寫入這裡。
-import { makeEntry, makeOption, optionKey } from './cash.mjs';
+// 只存記帳、現金設定、錢包與自訂的渠道／分類；Google 授權 Token 從不寫入這裡。
+import { makeEntry, makeOption, optionKey, makeWallet, WALLET } from './cash.mjs';
 
 export const LOCAL_KEY = 'cash-ledger-v1';
 const empty = () => ({
   entries: [],
   setting: null,
-  walletSetting: null,
+  wallets: [],
   options: [],
   pending: [],
   pendingOptions: [],
+  pendingWallets: [],
   fileId: '',
   lastSync: ''
 });
@@ -37,6 +38,20 @@ export class CashLocal {
             return [];
           }
         });
+        this.state.wallets = (raw.wallets || []).flatMap(w => {
+          try {
+            return [makeWallet(w)];
+          } catch {
+            return [];
+          }
+        });
+        // v1.4.0 kept one LINE Pay starting balance; it becomes the LINE Pay wallet.
+        if (raw.walletSetting && !this.state.wallets.some(w => w.name === WALLET)) {
+          this.state.wallets.push(makeWallet({ name: WALLET, ...raw.walletSetting }));
+          if (raw.walletSettingPending) this.state.pendingWallets.push(WALLET);
+        }
+        delete this.state.walletSetting;
+        delete this.state.walletSettingPending;
       }
     } catch {
       this.ok = false;
@@ -63,8 +78,9 @@ export class CashLocal {
   get setting() {
     return this.state.setting;
   }
-  get walletSetting() {
-    return this.state.walletSetting || null;
+  // Map of wallet name → { name, cents, date, updatedAt, deleted }.
+  get wallets() {
+    return new Map(this.state.wallets.map(w => [w.name, w]));
   }
   get options() {
     return new Map(this.state.options.map(o => [optionKey(o), o]));
@@ -73,8 +89,8 @@ export class CashLocal {
     return (
       this.state.pending.length +
       this.state.pendingOptions.length +
-      (this.state.settingPending ? 1 : 0) +
-      (this.state.walletSettingPending ? 1 : 0)
+      this.state.pendingWallets.length +
+      (this.state.settingPending ? 1 : 0)
     );
   }
   // Add or remove one of your own channels or categories.
@@ -95,10 +111,14 @@ export class CashLocal {
   remove(entry, now = new Date().toISOString()) {
     return this.put({ ...entry, deleted: true, updatedAt: now });
   }
-  setWalletSetting(cents, date, now = new Date().toISOString()) {
-    this.state.walletSetting = { cents, date, updatedAt: now };
-    this.state.walletSettingPending = true;
+  // Add a wallet, set its starting balance, or remove it.
+  putWallet(wallet) {
+    this.state.wallets = [...this.state.wallets.filter(w => w.name !== wallet.name), wallet];
+    if (!this.state.pendingWallets.includes(wallet.name)) this.state.pendingWallets.push(wallet.name);
     return this.save();
+  }
+  setWalletBalance(name, cents, date, now = new Date().toISOString()) {
+    return this.putWallet(makeWallet({ name, cents, date, updatedAt: now }));
   }
   setSetting(cents, date, now = new Date().toISOString()) {
     this.state.setting = { cents, date, updatedAt: now };
@@ -110,17 +130,22 @@ export class CashLocal {
   synced({
     entries,
     setting,
-    walletSetting = null,
+    wallets = new Map(),
     options = new Map(),
     fileId,
     at = new Date().toISOString()
   }) {
-    const myWallet = this.state.walletSetting;
-    this.state.walletSettingPending = !!(
-      myWallet &&
-      (!walletSetting || myWallet.updatedAt > walletSetting.updatedAt)
-    );
-    this.state.walletSetting = this.state.walletSettingPending ? myWallet : walletSetting;
+    const ws = new Map(wallets),
+      pendingWallets = [];
+    for (const w of this.state.wallets) {
+      const s = wallets.get(w.name);
+      if (!s || w.updatedAt > s.updatedAt) {
+        ws.set(w.name, w);
+        pendingWallets.push(w.name);
+      }
+    }
+    this.state.wallets = [...ws.values()];
+    this.state.pendingWallets = pendingWallets;
     const opts = new Map(options),
       pendingOptions = [];
     for (const o of this.state.options) {

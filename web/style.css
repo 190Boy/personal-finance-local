@@ -854,3 +854,63 @@ input[type='month']::-webkit-date-and-time-value {
   font-size: 12px;
   font-weight: 400;
 }
+
+.wallet-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.wallet-cards .wallet-line {
+  margin: 0;
+}
+.wallet-line[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.row-label {
+  margin: 4px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+#toRow {
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: 6px;
+}
+#toRow .chip {
+  padding: 3px 11px;
+}
+.wallet-list {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.wallet-item {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.wallet-item h3 {
+  margin: 0 0 2px;
+  font-size: 15px;
+}
+.wallet-item p {
+  margin: 0 0 6px;
+}
+.small-btn {
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.inline-form.wallet-add {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+@media (max-width: 480px) {
+  .inline-form.wallet-add {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .wallet-add button {
+    grid-column: 1 / -1;
+  }
+}

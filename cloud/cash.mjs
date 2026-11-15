@@ -3,13 +3,14 @@
 
 export const TYPES = ['支出', '收入', '提款', '存入', '儲值'];
 // 提款：從銀行領現金，現金增加但不是收入；存入：把現金存回銀行，現金減少但不是支出。
-// 儲值：從「渠道」那個帳戶轉進 LINE Pay，LINE Pay 增加、來源減少，不是支出也不是收入。
+// 儲值：從「渠道」那個帳戶轉進「轉入」的錢包，錢包增加、來源減少，不是支出也不是收入。
 // SIGN 是對「渠道」那個帳戶的增減。
 export const SIGN = { 支出: -1, 收入: 1, 提款: 1, 存入: -1, 儲值: -1 };
-// 渠道：錢從哪裡付、進到哪裡。現金與 LINE Pay 會算餘額（每一筆都記）；其他渠道是給 BOT 對帳用的參考紀錄。
+// 渠道：錢從哪裡付、進到哪裡。現金與錢包會算餘額（每一筆都記）；其他渠道是給 BOT 對帳用的參考紀錄。
+// 錢包：像 LINE Pay 這樣自己記每一筆、算餘額的帳戶。LINE Pay 是預設錢包，其他可以自己新增。
 export const CASH = '現金';
 export const WALLET = 'LINE Pay';
-export const TRACKED = [CASH, WALLET];
+export const DEFAULT_WALLETS = [WALLET];
 export const DEFAULT_CHANNELS = [CASH, '玉山銀行', '中信銀行', '凱基信用卡', '中信信用卡', 'LINE Pay'];
 
 export const LOG_SHEET = '異動紀錄';
@@ -25,16 +26,20 @@ export const LOG_HEADERS = [
   '狀態',
   '建立時間',
   '更新時間',
-  '渠道'
+  '渠道',
+  '轉入'
 ];
-// v1.0.0 sheets have no 渠道 column; they are read as cash and upgraded on the next sync.
+// v1.0.0 sheets have no 渠道 column (read as cash); before v1.5.0 there is no 轉入 column (a top-up went into
+// LINE Pay). Both are upgraded on the next sync.
 export const LOG_HEADERS_V1 = LOG_HEADERS.slice(0, 11);
+export const LOG_HEADERS_V2 = LOG_HEADERS.slice(0, 12);
 export const DETAIL_SHEET = '記帳明細';
 export const DETAIL_HEADERS = [
   '日期',
   '時間',
   '類型',
   '渠道',
+  '轉入',
   '金額（元）',
   '增減（元）',
   '主分類',
@@ -42,7 +47,7 @@ export const DETAIL_HEADERS = [
   '對象／商店',
   '備註',
   '記帳後現金（元）',
-  '記帳後 LINE Pay（元）',
+  '記帳後錢包（元）',
   'ID',
   '更新時間'
 ];
@@ -58,10 +63,20 @@ export const MONTH_HEADERS = [
   '筆數',
   '月底餘額（元）'
 ];
-// 試算表欄位或資料意義有變時加 1，並同步更新 BOT 說明書（見 README）。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）；3 = v1.2.0 起（記帳明細可直接打字）；4 = v1.3.0 起（預設渠道指定銀行與信用卡）；5 = v1.4.0 起（LINE Pay 結餘、儲值）。
-export const SCHEMA_VERSION = 5;
+// 試算表欄位或資料意義有變時加 1，並同步更新 BOT 說明書（見 README）。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）；3 = v1.2.0 起（記帳明細可直接打字）；4 = v1.3.0 起（預設渠道指定銀行與信用卡）；5 = v1.4.0 起（LINE Pay 結餘、儲值）；6 = v1.5.0 起（多個錢包、轉入、錢包工作表）。
+export const SCHEMA_VERSION = 6;
 export const SETTING_SHEET = '設定';
 export const SETTING_HEADERS = ['項目', '內容', '說明'];
+// 每個錢包一列：起始餘額與日期（空白表示還沒設定）、目前餘額；刪掉的錢包狀態是「已刪除」。
+export const WALLET_SHEET = '錢包';
+export const WALLET_HEADERS = [
+  '錢包',
+  '起始餘額（元）',
+  '起始日期',
+  '設定更新時間',
+  '目前餘額（元）',
+  '狀態'
+];
 // 自己新增的渠道、分類、子分類。種類：渠道／支出分類／收入分類；子分類的「上層」填主分類名稱。
 export const OPTION_SHEET = '選項';
 export const OPTION_HEADERS = ['種類', '名稱', '上層', '圖示', '狀態', '更新時間'];
@@ -96,6 +111,9 @@ export function makeEntry(input, now = new Date().toISOString()) {
     channel: String(input.channel || CASH)
       .trim()
       .slice(0, 20),
+    to: String(input.to || '')
+      .trim()
+      .slice(0, 20),
     party: String(input.party || '')
       .trim()
       .slice(0, 60),
@@ -119,25 +137,29 @@ export function makeEntry(input, now = new Date().toISOString()) {
   }
   if (e.type === '儲值') {
     e.category = '';
-    if (e.channel === WALLET) throw Error('CASH_TOPUP');
-  }
+    // Records from before v1.5.0 have no destination: they went into LINE Pay.
+    e.to ||= WALLET;
+    if (e.channel === e.to) throw Error('CASH_TOPUP');
+  } else e.to = '';
   if (!e.channel) throw Error('CASH_CHANNEL');
   return e;
 }
 export const isCash = e => e.channel === CASH;
 // The record's money in (+) or out (−) on its own channel.
 export const amountOf = e => (e.deleted ? 0 : SIGN[e.type] * e.amountCents);
-// How one record moves each account: its own channel by SIGN, and a top-up also adds to LINE Pay.
+// How one record moves each account: its own channel by SIGN, and a top-up also adds to its wallet.
 export function flowsOf(e) {
   if (e.deleted) return {};
   const out = { [e.channel]: amountOf(e) };
-  if (e.type === '儲值') out[WALLET] = (out[WALLET] || 0) + e.amountCents;
+  if (e.type === '儲值') out[e.to] = (out[e.to] || 0) + e.amountCents;
   return out;
 }
+// The wallet whose balance a record shows: where a top-up went, or the record's own channel.
+export const walletOf = (e, wallets) =>
+  e.type === '儲值' ? e.to : wallets.includes(e.channel) ? e.channel : '';
 export const moves = (e, account) => (flowsOf(e)[account] || 0) !== 0;
 // The record's effect on the cash balance (0 when it does not touch cash).
 export const flowOf = e => flowsOf(e)[CASH] || 0;
-export const walletFlowOf = e => flowsOf(e)[WALLET] || 0;
 const order = (a, b) =>
   a.date.localeCompare(b.date) ||
   (a.time || '').localeCompare(b.time || '') ||
@@ -187,13 +209,14 @@ export function logRow(e) {
     e.deleted ? '已刪除' : '有效',
     e.createdAt,
     e.updatedAt,
-    e.channel
+    e.channel,
+    e.to
   ];
 }
 export function readLog(values) {
   if (!values.length) return [];
   const head = JSON.stringify(values[0]);
-  if (head !== JSON.stringify(LOG_HEADERS) && head !== JSON.stringify(LOG_HEADERS_V1))
+  if (![LOG_HEADERS, LOG_HEADERS_V2, LOG_HEADERS_V1].some(h => head === JSON.stringify(h)))
     throw Error('SHEET_SCHEMA');
   const out = [];
   for (const r of values.slice(1)) {
@@ -211,7 +234,8 @@ export function readLog(values) {
           deleted: r[8] === '已刪除',
           createdAt: String(r[9] || ''),
           updatedAt: String(r[10] || ''),
-          channel: String(r[11] || CASH)
+          channel: String(r[11] || CASH),
+          to: String(r[12] || '')
         })
       );
     } catch {
@@ -224,21 +248,64 @@ export function readLog(values) {
 // Every live record in time order. Records that move cash carry `balanceCents` (cash left after them) and
 // records that move LINE Pay carry `walletCents`; others get null. A setting is the amount counted at 00:00 on its
 // day: records from that day on add up from it, earlier ones are worked out backwards.
-function runBalance(rows, account, setting, key) {
+function runBalance(rows, account, setting, set) {
   const list = rows.filter(e => moves(e, account));
   const start = setting?.cents ?? 0,
     anchorDate = setting?.date || '';
   let anchor = anchorDate ? list.findIndex(e => e.date >= anchorDate) : 0;
   if (anchor < 0) anchor = list.length;
   let run = start;
-  for (let i = anchor; i < list.length; i++) list[i][key] = run += flowsOf(list[i])[account];
+  for (let i = anchor; i < list.length; i++) set(list[i], (run += flowsOf(list[i])[account]));
   run = start;
   for (let i = anchor - 1; i >= 0; i--) {
-    list[i][key] = run;
+    set(list[i], run);
     run -= flowsOf(list[i])[account];
   }
 }
-export function ledger(entries, setting, walletSetting = null) {
+
+// ---------- Wallets ----------
+// A wallet is { name, cents, date, updatedAt, deleted }; cents null means no starting balance yet.
+export function makeWallet(input, now = new Date().toISOString()) {
+  const cents = input.cents ?? null;
+  const w = {
+    name: String(input.name || '')
+      .trim()
+      .replace(/／/g, '/')
+      .slice(0, 20),
+    cents: Number.isSafeInteger(cents) ? cents : null,
+    date: String(input.date || ''),
+    updatedAt: String(input.updatedAt || now),
+    deleted: !!input.deleted
+  };
+  if (!w.name) throw Error('OPTION_NAME');
+  if (w.name === CASH) throw Error('WALLET_CASH');
+  if (w.cents != null && (w.cents < 0 || !DATE.test(w.date))) throw Error('CASH_AMOUNT');
+  if (w.cents == null) w.date = '';
+  if (DEFAULT_WALLETS.includes(w.name)) w.deleted = false;
+  return w;
+}
+// Older callers pass a single LINE Pay setting instead of a Map of wallets.
+const asWallets = w =>
+  w instanceof Map ? w : w ? new Map([[WALLET, { name: WALLET, ...w, deleted: false }]]) : new Map();
+export function walletNames(wallets = new Map()) {
+  const names = [...DEFAULT_WALLETS];
+  for (const w of asWallets(wallets).values()) if (!w.deleted && !names.includes(w.name)) names.push(w.name);
+  return names;
+}
+export const anchorOf = w => (w && w.cents != null && w.date ? { cents: w.cents, date: w.date } : null);
+export function mergeWallets(local, remote) {
+  const out = new Map(remote);
+  for (const [k, w] of local) if (!out.has(k) || w.updatedAt > out.get(k).updatedAt) out.set(k, w);
+  return out;
+}
+
+// Every live record in time order. Records that move cash carry `balanceCents` (cash left after them);
+// records that move a wallet with a starting balance carry `wallet` and `walletCents` (that wallet after them).
+// A starting balance is the amount at 00:00 on its day: records from that day on add up from it, earlier ones are
+// worked out backwards.
+export function ledger(entries, setting, wallets = new Map()) {
+  wallets = asWallets(wallets);
+  const names = walletNames(wallets);
   const out = [...entries]
     .filter(e => !e.deleted)
     .sort(order)
@@ -247,13 +314,20 @@ export function ledger(entries, setting, walletSetting = null) {
       amountSigned: amountOf(e),
       flowCents: flowOf(e),
       balanceCents: null,
-      walletCents: null
+      wallet: walletOf(e, names),
+      walletCents: null,
+      walletBalances: {}
     }));
-  runBalance(out, CASH, setting, 'balanceCents');
-  runBalance(out, WALLET, walletSetting, 'walletCents');
+  runBalance(out, CASH, setting, (e, v) => (e.balanceCents = v));
+  for (const name of names) {
+    const a = anchorOf(wallets.get(name));
+    if (a) runBalance(out, name, a, (e, v) => (e.walletBalances[name] = v));
+  }
+  for (const e of out)
+    if (e.wallet && e.walletBalances[e.wallet] != null) e.walletCents = e.walletBalances[e.wallet];
   return out;
 }
-// Balance of 現金 or LINE Pay now: the setting plus every record from its day on.
+// Balance of 現金 or a wallet now: the starting balance plus every record from its day on.
 export function balanceNow(entries, setting, account = CASH) {
   const anchorDate = setting?.date || '';
   return (
@@ -264,6 +338,47 @@ export function balanceNow(entries, setting, account = CASH) {
   );
 }
 export const cashNow = (entries, setting) => balanceNow(entries, setting, CASH);
+export function walletRows(wallets, entries) {
+  // entries may be a one-shot iterator (map.values()); every wallet needs to walk it.
+  entries = [...entries];
+  const list = asWallets(wallets);
+  const rows = walletNames(list).map(name => list.get(name) || makeWallet({ name, updatedAt: '' }));
+  for (const w of list.values()) if (w.deleted && !rows.includes(w)) rows.push(w);
+  return [
+    WALLET_HEADERS,
+    ...rows.map(w => {
+      const a = anchorOf(w);
+      return [
+        w.name,
+        a ? a.cents / 100 : '',
+        a ? a.date : '',
+        w.updatedAt,
+        a && !w.deleted ? balanceNow(entries, a, w.name) / 100 : '',
+        w.deleted ? '已刪除' : '使用中'
+      ];
+    })
+  ];
+}
+export function readWallets(values) {
+  const out = new Map();
+  if (!values.length || JSON.stringify(values[0]) !== JSON.stringify(WALLET_HEADERS)) return out;
+  for (const r of values.slice(1)) {
+    try {
+      const cents = String(r[1] ?? '') === '' ? null : parseCents(String(r[1]));
+      const w = makeWallet({
+        name: String(r[0] ?? ''),
+        cents: Number.isSafeInteger(cents) ? cents : null,
+        date: String(r[2] ?? ''),
+        updatedAt: String(r[3] || ''),
+        deleted: r[5] === '已刪除'
+      });
+      if (!out.has(w.name) || w.updatedAt >= out.get(w.name).updatedAt) out.set(w.name, w);
+    } catch {
+      // Skip rows edited by hand into something unreadable.
+    }
+  }
+  return out;
+}
 
 // channel '' means every channel.
 export function monthSummary(entries, month, channel = '') {
@@ -280,7 +395,7 @@ export function monthSummary(entries, month, channel = '') {
   const by = new Map();
   for (const e of entries) {
     // A top-up shows under its source and under LINE Pay.
-    const inChannel = !channel || e.channel === channel || (e.type === '儲值' && channel === WALLET);
+    const inChannel = !channel || e.channel === channel || (e.type === '儲值' && e.to === channel);
     if (e.deleted || e.date.slice(0, 7) !== month || !inChannel) continue;
     out.count++;
     if (e.type === '支出') {
@@ -306,6 +421,7 @@ export function detailRows(rows) {
         e.time,
         e.type,
         e.channel,
+        e.to,
         e.amountCents / 100,
         e.amountSigned / 100,
         main,
@@ -320,8 +436,8 @@ export function detailRows(rows) {
     })
   ];
 }
-// One row per month and channel. A top-up is counted on the LINE Pay row. 月底餘額 is filled for 現金 and
-// LINE Pay: the balance after the month's last record that moved that account.
+// One row per month and channel. A top-up is counted on the wallet it went into. 月底餘額 is filled for 現金 and
+// each wallet with a starting balance: the balance after the month's last record that moved that account.
 export function monthRows(rows) {
   const groups = new Map();
   const group = (m, channel) => {
@@ -332,11 +448,12 @@ export function monthRows(rows) {
   };
   for (const e of rows) {
     const m = e.date.slice(0, 7);
-    const t = group(m, e.type === '儲值' ? WALLET : e.channel);
+    // A top-up is counted on the wallet it went into.
+    const t = group(m, e.type === '儲值' ? e.to : e.channel);
     t[e.type] += e.amountCents;
     t.count++;
     if (e.balanceCents != null) group(m, CASH).end = e.balanceCents;
-    if (e.walletCents != null) group(m, WALLET).end = e.walletCents;
+    for (const [name, cents] of Object.entries(e.walletBalances || {})) group(m, name).end = cents;
   }
   return [
     MONTH_HEADERS,
@@ -421,9 +538,10 @@ export function readOptions(values) {
   return out;
 }
 // The channel list: the four defaults, then your own.
-export function channelList(options) {
+// Channels to pick from: the defaults, your own channels, and every wallet.
+export function channelList(options, wallets = new Map()) {
   const own = [...options.values()].filter(o => o.kind === '渠道' && !o.deleted).map(o => o.name);
-  return [...new Set([...DEFAULT_CHANNELS, ...own])];
+  return [...new Set([...DEFAULT_CHANNELS, ...own, ...walletNames(wallets)])];
 }
 // The category tree for 支出 or 收入: built-in categories plus your own main and sub categories.
 export function categoryTree(base, options, type) {
@@ -442,21 +560,14 @@ export function categoryTree(base, options, type) {
     ownSubs: live.filter(o => o.parent === c.name).map(o => o.name)
   }));
 }
-export function settingRows(setting, cashCents, wallet = null, walletCents = 0) {
+// Wallet balances now live in the 錢包 sheet; 設定 keeps cash and the sheet-wide items.
+export function settingRows(setting, cashCents) {
   return [
     SETTING_HEADERS,
     ['起始現金（元）', setting ? setting.cents / 100 : '', '設定當天 00:00 身上的現金'],
     ['起始日期', setting?.date || '', '這一天（含）以後的記帳往後加減，之前的往回推'],
     ['設定更新時間', setting?.updatedAt || '', ''],
     ['目前現金（元）', cashCents / 100, '最後一次同步時算出的金額'],
-    [
-      'LINE Pay 起始餘額（元）',
-      wallet ? wallet.cents / 100 : '',
-      '設定當天 00:00 LINE Pay 裡的錢；空白表示還沒設定'
-    ],
-    ['LINE Pay 起始日期', wallet?.date || '', ''],
-    ['LINE Pay 設定更新時間', wallet?.updatedAt || '', ''],
-    ['LINE Pay 目前餘額（元）', wallet ? walletCents / 100 : '', '最後一次同步時算出的金額'],
     ['同步時間', new Date().toISOString(), ''],
     [
       '資料格式版本',
@@ -465,7 +576,7 @@ export function settingRows(setting, cashCents, wallet = null, walletCents = 0) 
     ],
     [
       '說明',
-      '「記帳明細」一列一筆、已是最新狀態；「記帳後現金」「記帳後 LINE Pay」只在那一筆動到該帳戶時才有值。「異動紀錄」保留每次修改，請勿手動編輯。',
+      '「記帳明細」一列一筆、已是最新狀態；「記帳後現金」「記帳後錢包」只在那一筆動到該帳戶時才有值。錢包的起始與目前餘額在「錢包」工作表。「異動紀錄」保留每次修改，請勿手動編輯。',
       ''
     ]
   ];
@@ -479,6 +590,7 @@ function readAnchor(values, amountName, dateName, timeName) {
   return { cents, date, updatedAt };
 }
 export const readSetting = values => readAnchor(values, '起始現金（元）', '起始日期', '設定更新時間');
+// v1.4.0 kept the LINE Pay starting balance in 設定; it is read once and moved to the 錢包 sheet.
 export const readWalletSetting = values =>
   readAnchor(values, 'LINE Pay 起始餘額（元）', 'LINE Pay 起始日期', 'LINE Pay 設定更新時間');
 
@@ -523,12 +635,12 @@ function looseCents(v) {
   if (typeof v === 'number') return Number.isFinite(v) ? Math.round(Math.abs(v) * 100) : NaN;
   return parseCents(String(v ?? '').replace(/^[-−]/, ''));
 }
-const SAME = ['date', 'time', 'type', 'channel', 'amountCents', 'category', 'party', 'note'];
+const SAME = ['date', 'time', 'type', 'channel', 'to', 'amountCents', 'category', 'party', 'note'];
 const ROW_REASONS = {
   CASH_DATE: '日期看不懂，請用 2026-11-13 或 2026/11/13',
   CASH_TIME: '時間看不懂，請用 14:30，或留空',
   CASH_TYPE: '類型只能是支出、收入、提款、存入、儲值，或「刪除」',
-  CASH_TOPUP: '儲值的渠道要填錢從哪裡來（例如現金、玉山銀行），不能是 LINE Pay',
+  CASH_TOPUP: '儲值的渠道要填錢從哪裡來（例如現金、玉山銀行），「轉入」填要儲值的錢包，兩個不能一樣',
   CASH_AMOUNT: '金額要是大於 0 的數字',
   CASH_CHANNEL: '渠道不能是空的',
   CASH_ID: 'ID 不正確，新增的列請讓 ID 留空'
@@ -552,7 +664,8 @@ export function readDetailEdits(
       changes,
       problems: [{ row: 1, reason: '找不到欄位：' + missing.join('、') + '。請還原第一列的欄名' }]
     };
-  const cell = (r, name) => r[col(name)] ?? '';
+  // 轉入 is optional: sheets from before v1.5.0 do not have it.
+  const cell = (r, name) => (col(name) < 0 ? '' : (r[col(name)] ?? ''));
   values.slice(1).forEach((r, i) => {
     const row = i + 2;
     if (!r.some(v => String(v ?? '').trim() !== '')) return;
@@ -583,6 +696,7 @@ export function readDetailEdits(
         amountCents: looseCents(cell(r, '金額（元）')),
         category,
         channel: String(cell(r, '渠道')).trim() || CASH,
+        to: String(cell(r, '轉入')).trim(),
         party: String(cell(r, '對象／商店')),
         note: String(cell(r, '備註')),
         createdAt: old?.createdAt || now,

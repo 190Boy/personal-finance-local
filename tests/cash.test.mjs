@@ -23,6 +23,7 @@ import {
   channelList,
   categoryTree,
   readDetailEdits,
+  makeWallet,
   balanceNow,
   readWalletSetting,
   LOG_HEADERS_V1,
@@ -32,6 +33,10 @@ import {
 import { CashLocal } from '../cloud/cash-local.mjs';
 import { CashStore, FILE_NAME } from '../cloud/cash-store.mjs';
 import { CATEGORY_TREE } from '../cloud/categories.mjs';
+
+// Read and write sheet cells by column name, as the BOT is told to.
+const at = (values, row, name) => values[row][values[0].indexOf(name)];
+const pick = (values, row, names) => names.map(n => at(values, row, n));
 
 let n = 0;
 const e = (type, date, amount, extra = {}) =>
@@ -100,19 +105,21 @@ test('cash counts from 00:00 on the setting day forwards and is worked out backw
   assert.deepEqual(m.byCategory, [{ name: '餐飲', cents: 62000 }]);
   const detail = detailRows(rows);
   assert.deepEqual(detail[0], DETAIL_HEADERS);
-  assert.deepEqual(detail[1].slice(0, 11), [
-    '2026-11-02',
-    '',
-    '支出',
-    '現金',
-    500,
-    -500,
-    '餐飲',
-    '午餐',
-    '',
-    '',
-    1000
-  ]);
+  assert.deepEqual(
+    pick(detail, 1, [
+      '日期',
+      '時間',
+      '類型',
+      '渠道',
+      '轉入',
+      '金額（元）',
+      '增減（元）',
+      '主分類',
+      '子分類',
+      '記帳後現金（元）'
+    ]),
+    ['2026-11-02', '', '支出', '現金', '', 500, -500, '餐飲', '午餐', 1000]
+  );
   assert.deepEqual(monthRows(rows)[1], ['2026-11', '現金', 620, 1000, 3000, 300, 0, 6, 4580]);
 });
 
@@ -139,7 +146,7 @@ test('the newer version of a record or setting wins in either direction', () => 
     settingRows(setting, 0)
       .find(r => r[0] === '資料格式版本')
       .slice(0, 2),
-    ['資料格式版本', 5]
+    ['資料格式版本', 6]
   );
 });
 
@@ -240,25 +247,25 @@ test('the first sync creates 現金記帳; a second device merges, edits and del
   const book = g.books.get('sheet1');
   assert.deepEqual(
     book.sheets.map(s => s.title),
-    ['記帳明細', '月份統計', '設定', '選項', '異動紀錄']
+    ['記帳明細', '月份統計', '錢包', '設定', '選項', '異動紀錄']
   );
   const lunch = e('支出', '2026-11-13', '160', { id: 'lunch' });
   const setting = { cents: 350000, date: '2026-11-13', updatedAt: '2026-11-13T01:00:00Z' };
   let r = await phone.sync(new Map([['lunch', lunch]]), setting);
   assert.equal(r.uploaded, 1);
-  assert.deepEqual(book.values['記帳明細'][1].slice(0, 11), [
-    '2026-11-13',
-    '',
-    '支出',
-    '現金',
-    160,
-    -160,
-    '餐飲',
-    '午餐',
-    '',
-    '',
-    3340
-  ]);
+  assert.deepEqual(
+    pick(book.values['記帳明細'], 1, [
+      '日期',
+      '類型',
+      '渠道',
+      '金額（元）',
+      '增減（元）',
+      '主分類',
+      '子分類',
+      '記帳後現金（元）'
+    ]),
+    ['2026-11-13', '支出', '現金', 160, -160, '餐飲', '午餐', 3340]
+  );
   assert.equal(book.values['設定'][4][1], 3340);
 
   // Another device opens the same file (no new file), sees the record and the setting.
@@ -311,7 +318,7 @@ test('only cash records move the cash balance; other channels are listed for ref
       ['現金', 300000, 380000]
     ]
   );
-  assert.deepEqual(detailRows(rows)[2].slice(3, 6).concat(detailRows(rows)[2][10]), [
+  assert.deepEqual(pick(detailRows(rows), 2, ['渠道', '金額（元）', '增減（元）', '記帳後現金（元）']), [
     '信用卡',
     890,
     -890,
@@ -394,12 +401,12 @@ test('a v1.0.0 sheet without the 渠道 column reads as cash and gets the new he
   const book = g.books.get('sheet1');
   book.values['異動紀錄'] = old;
   await s.ensureSheets();
-  assert.equal(book.values['異動紀錄'][0].at(-1), '渠道');
+  assert.equal(book.values['異動紀錄'][0].at(-1), '轉入');
   const opt = makeOption({ kind: '渠道', name: '悠遊卡' });
   const r = await s.sync(new Map(), null, new Map([[optionKey(opt), opt]]));
   assert.equal(r.entries.get('old').channel, '現金');
   assert.deepEqual(book.values['選項'][1].slice(0, 5), ['渠道', '悠遊卡', '', '', '使用中']);
-  assert.equal(book.values['記帳明細'][1][3], '現金');
+  assert.equal(at(book.values['記帳明細'], 1, '渠道'), '現金');
 });
 
 test('options added on the phone stay pending until the sheet has them', () => {
@@ -433,8 +440,8 @@ test('rows typed in 記帳明細 come back: new rows, edits, 刪除, loose forma
   let n = 0;
   const opts = { now: '2026-11-13T08:00:00Z', newId: () => 'new' + ++n };
   const typed = structuredClone(sheet);
-  typed[1][4] = 180; // edit the amount of k1
-  typed[2][2] = '刪除'; // delete k2
+  typed[1][typed[0].indexOf('金額（元）')] = 180; // edit the amount of k1
+  typed[2][typed[0].indexOf('類型')] = '刪除'; // delete k2
   const blank = DETAIL_HEADERS.map(() => '');
   const row = values => DETAIL_HEADERS.map(h => values[h] ?? '');
   typed.push(
@@ -502,7 +509,7 @@ test('a sync takes rows typed in the sheet, and refuses to overwrite a sheet wit
   const tea = [...r.entries.values()].find(x => x.party === '50嵐');
   assert.ok(tea && tea.id);
   // It now has an ID in the sheet and a row in the log.
-  assert.ok(book.values['記帳明細'].some(x => x[12] === tea.id));
+  assert.ok(book.values['記帳明細'].some(x => x[book.values['記帳明細'][0].indexOf('ID')] === tea.id));
   assert.ok(book.values['異動紀錄'].some(x => x[0] === tea.id));
   // A second sync changes nothing.
   r = await s.sync(r.entries, null);
@@ -547,8 +554,10 @@ test('LINE Pay keeps its own balance like cash; a top-up moves money from its so
     ]
   );
   // 記帳明細 has the LINE Pay balance next to the cash balance.
-  const top = detailRows(rows)[3];
-  assert.deepEqual([top[2], top[3], top[5], top[10], top[11]], ['儲值', '現金', -1000, 2000, 3254]);
+  assert.deepEqual(
+    pick(detailRows(rows), 3, ['類型', '渠道', '轉入', '增減（元）', '記帳後現金（元）', '記帳後錢包（元）']),
+    ['儲值', '現金', 'LINE Pay', -1000, 2000, 3254]
+  );
   // 月份統計: top-ups are counted on the LINE Pay row, which also has its month-end balance.
   const months = monthRows(rows).slice(1);
   const lp = months.find(r => r[1] === 'LINE Pay'),
@@ -560,34 +569,136 @@ test('LINE Pay keeps its own balance like cash; a top-up moves money from its so
   assert.deepEqual([m.expenseCents, m.incomeCents, m.topupCents], [25500, 30000, 300000]);
   assert.equal(monthSummary(list, '2026-11', 'LINE Pay').topupCents, 300000);
   assert.equal(monthSummary(list, '2026-11', '現金').topupCents, 100000);
-  // Both settings round-trip through the 設定 sheet.
-  const sheet = settingRows(cashSet, 0, walletSet, 0);
-  assert.deepEqual([readSetting(sheet), readWalletSetting(sheet)], [cashSet, walletSet]);
+  // 設定 keeps cash only; wallet balances are in the 錢包 sheet.
+  assert.deepEqual(readSetting(settingRows(cashSet, 0)), cashSet);
   assert.equal(readWalletSetting(settingRows(cashSet, 0)), null);
 });
 
-test('the LINE Pay starting balance syncs through 設定 and reaches a second device', async () => {
+test('wallets and their starting balances sync through the 錢包 sheet and reach a second device', async () => {
   const g = fakeGoogle();
   const phone = new CashStore({ fetcher: g.fetcher });
   phone.authorize('t', 3600);
   await phone.open();
-  const wallet = { cents: 233900, date: '2026-11-15', updatedAt: '2026-11-15T09:00:00Z' };
+  const lp = makeWallet({
+    name: 'LINE Pay',
+    cents: 233900,
+    date: '2026-11-15',
+    updatedAt: '2026-11-15T09:00:00Z'
+  });
+  const easy = makeWallet({
+    name: '悠遊卡',
+    cents: 50000,
+    date: '2026-11-15',
+    updatedAt: '2026-11-15T09:00:00Z'
+  });
+  const wallets = new Map([
+    ['LINE Pay', lp],
+    ['悠遊卡', easy]
+  ]);
   const pay = e('支出', '2026-11-15', '85', { id: 'pay', channel: 'LINE Pay' });
-  let r = await phone.sync(new Map([['pay', pay]]), null, new Map(), wallet);
-  assert.deepEqual(r.walletSetting, wallet);
+  const bus = e('支出', '2026-11-15', '15', {
+    id: 'bus',
+    channel: '悠遊卡',
+    category: '交通／大眾運輸',
+    time: '09:00'
+  });
+  const top = e('儲值', '2026-11-15', '500', { id: 'top', channel: '現金', to: '悠遊卡', time: '08:00' });
+  let r = await phone.sync(
+    new Map([
+      ['pay', pay],
+      ['bus', bus],
+      ['top', top]
+    ]),
+    null,
+    new Map(),
+    wallets
+  );
+  assert.deepEqual(r.wallets.get('悠遊卡'), easy);
   const book = g.books.get('sheet1');
-  const get = name => book.values['設定'].find(x => x[0] === name)?.[1];
-  assert.deepEqual([get('LINE Pay 起始餘額（元）'), get('LINE Pay 目前餘額（元）')], [2339, 2254]);
-  assert.equal(book.values['記帳明細'][1][11], 2254);
+  const sheet = book.values['錢包'];
+  const row = name => sheet.find(x => x[0] === name);
+  assert.deepEqual(sheet[0], [
+    '錢包',
+    '起始餘額（元）',
+    '起始日期',
+    '設定更新時間',
+    '目前餘額（元）',
+    '狀態'
+  ]);
+  assert.deepEqual(row('LINE Pay').slice(0, 5).concat(row('LINE Pay')[5]), [
+    'LINE Pay',
+    2339,
+    '2026-11-15',
+    lp.updatedAt,
+    2254,
+    '使用中'
+  ]);
+  assert.deepEqual([row('悠遊卡')[1], row('悠遊卡')[4]], [500, 985]);
+  // 記帳明細: each record shows the balance of the wallet it moved.
+  const detail = book.values['記帳明細'];
+  const byId = id => detail.findIndex(x => x[detail[0].indexOf('ID')] === id);
+  assert.equal(at(detail, byId('pay'), '記帳後錢包（元）'), 2254);
+  assert.deepEqual(pick(detail, byId('top'), ['轉入', '記帳後錢包（元）']), ['悠遊卡', 1000]);
+  assert.equal(at(detail, byId('bus'), '記帳後錢包（元）'), 985);
+  // 設定 no longer carries LINE Pay rows.
+  assert.ok(!book.values['設定'].some(x => String(x[0]).startsWith('LINE Pay')));
+  // 月份統計: the top-up is on the 悠遊卡 row, with its month-end balance.
+  const ez = book.values['月份統計'].find(x => x[1] === '悠遊卡');
+  assert.deepEqual(
+    pick([book.values['月份統計'][0], ez], 1, ['支出（元）', '儲值（元）', '月底餘額（元）']),
+    [15, 500, 985]
+  );
+  // A second device gets both wallets.
   const tablet = new CashStore({ fetcher: g.fetcher });
   tablet.authorize('t', 3600);
   await tablet.open();
   r = await tablet.sync(new Map(), null);
-  assert.deepEqual(r.walletSetting, wallet);
-  // On the phone, a newer local setting stays pending until the sheet has it.
-  const local = new CashLocal(memoryStorage());
-  local.setWalletSetting(100000, '2026-11-16', '2026-11-16T00:00:00Z');
-  local.synced({ entries: new Map(), setting: null, walletSetting: wallet, fileId: 'f' });
-  assert.equal(local.walletSetting.cents, 100000);
-  assert.equal(local.pendingCount, 1);
+  assert.deepEqual([...r.wallets.keys()].sort(), ['LINE Pay', '悠遊卡']);
+  // Removing a wallet keeps a 已刪除 row so other devices learn about it; LINE Pay cannot be removed.
+  await tablet.sync(
+    r.entries,
+    null,
+    new Map(),
+    new Map([['悠遊卡', { ...easy, deleted: true, updatedAt: '2026-11-15T10:00:00Z' }]])
+  );
+  assert.equal(book.values['錢包'].find(x => x[0] === '悠遊卡')[5], '已刪除');
+  assert.equal(makeWallet({ name: 'LINE Pay', deleted: true }).deleted, false);
+  assert.throws(() => makeWallet({ name: '現金' }), /WALLET_CASH/);
+});
+
+test('a v1.4.0 sheet and phone move the LINE Pay starting balance into the wallet list', async () => {
+  // Phone: the old single setting becomes the LINE Pay wallet, still pending if it was.
+  const storage = memoryStorage();
+  storage.setItem(
+    'cash-ledger-v1',
+    JSON.stringify({
+      entries: [],
+      walletSetting: { cents: 174400, date: '2026-11-15', updatedAt: '2026-11-15T01:00:00Z' },
+      walletSettingPending: true,
+      pending: []
+    })
+  );
+  const local = new CashLocal(storage);
+  assert.deepEqual([local.wallets.get('LINE Pay').cents, local.pendingCount], [174400, 1]);
+  // Sheet: LINE Pay rows in 設定 are read once when 錢包 has no LINE Pay row.
+  const g = fakeGoogle();
+  const s = new CashStore({ fetcher: g.fetcher });
+  s.authorize('t', 3600);
+  await s.open();
+  const book = g.books.get('sheet1');
+  book.values['設定'] = [
+    ['項目', '內容', '說明'],
+    ['LINE Pay 起始餘額（元）', 1744, ''],
+    ['LINE Pay 起始日期', '2026-11-15', ''],
+    ['LINE Pay 設定更新時間', '2026-11-15T01:00:00Z', '']
+  ];
+  const old = e('儲值', '2026-11-15', '100', { id: 'old', channel: '現金' });
+  // A v1.4.0 top-up has no 轉入 and went into LINE Pay.
+  book.values['異動紀錄'] = [LOG_HEADERS.slice(0, 12), logRow(old).slice(0, 12)];
+  await s.ensureSheets();
+  const r = await s.sync(new Map(), null);
+  assert.equal(r.wallets.get('LINE Pay').cents, 174400);
+  assert.equal(r.entries.get('old').to, 'LINE Pay');
+  assert.equal(book.values['錢包'].find(x => x[0] === 'LINE Pay')[4], 1844);
+  assert.equal(book.values['異動紀錄'][0].at(-1), '轉入');
 });
