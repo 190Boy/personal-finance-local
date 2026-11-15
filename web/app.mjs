@@ -9,7 +9,9 @@ import {
   channelList,
   categoryTree,
   CASH,
-  WALLET,
+  DEFAULT_WALLETS,
+  walletNames,
+  makeWallet,
   balanceNow
 } from '../cloud/cash.mjs';
 import { CashLocal } from '../cloud/cash-local.mjs';
@@ -46,7 +48,8 @@ const messages = {
   CASH_AMOUNT: '請填寫大於 0 的金額，最多到小數點後兩位。',
   CASH_CATEGORY: '請選一個分類。',
   CASH_CHANNEL: '請選擇渠道。',
-  CASH_TOPUP: '儲值要選錢從哪裡來，不能選 LINE Pay。',
+  CASH_TOPUP: '儲值的來源和轉入不能是同一個錢包。',
+  WALLET_CASH: '「現金」已經有自己的結餘，錢包請取別的名字。',
   OPTION_NAME: '請填寫名稱。',
   CASH_EXPRESSION: '金額算式看不懂，只支援數字與 + −。',
   GOOGLE_NETWORK: '連不上 Google，記帳已先存在這台裝置，有網路時再同步。',
@@ -117,17 +120,46 @@ function drawHome() {
     ? '從 ' + setting.date.replaceAll('-', '/') + ' 00:00 的 ' + yuan(setting.cents) + ' 起算'
     : '還沒設定起始現金';
   $('welcome').hidden = !!setting || store.connected || entries.length > 0;
-  // LINE Pay balance, kept like cash.
-  const wallet = local.walletSetting;
-  const walletCents = balanceNow(entries, wallet, WALLET);
-  $('walletNow').textContent = wallet ? signedYuan(walletCents) : '未設定';
-  $('walletNow').classList.toggle('out', !!wallet && walletCents < 0);
-  $('walletAnchor').textContent = wallet
-    ? '從 ' + wallet.date.replaceAll('-', '/') + ' 00:00 的 ' + yuan(wallet.cents) + ' 起算'
-    : '到設定填 LINE Pay 裡現在的錢';
-  const used = new Set(entries.filter(e => !e.deleted && e.date.slice(0, 7) === month).map(e => e.channel));
+  // One card per wallet, each kept like cash. Tap one to see only its records.
+  const wallets = local.wallets;
+  const cards = $('walletCards');
+  cards.replaceChildren();
+  for (const name of walletNames(wallets)) {
+    const w = wallets.get(name);
+    const set = w && w.cents != null;
+    const cents = set ? balanceNow(entries, w, name) : 0;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'wallet-line';
+    b.dataset.wallet = name;
+    b.setAttribute('aria-pressed', String(filter === name));
+    const label = document.createElement('span');
+    label.textContent = '📱 ' + name;
+    const amount = document.createElement('strong');
+    amount.textContent = set ? signedYuan(cents) : '未設定';
+    amount.classList.toggle('out', set && cents < 0);
+    const anchor = document.createElement('small');
+    anchor.textContent = set
+      ? '從 ' + w.date.replaceAll('-', '/') + ' 00:00 的 ' + yuan(w.cents) + ' 起算'
+      : '到設定填裡面現在的錢';
+    b.append(label, amount, anchor);
+    b.addEventListener('click', () => {
+      if (!set) {
+        location.hash = '#settings';
+        return;
+      }
+      filter = filter === name ? '' : name;
+      drawHome();
+    });
+    cards.append(b);
+  }
+  const used = new Set(
+    entries
+      .filter(e => !e.deleted && e.date.slice(0, 7) === month)
+      .flatMap(e => (e.to ? [e.channel, e.to] : [e.channel]))
+  );
   if (filter && !used.has(filter)) filter = '';
-  const shown = channelList(local.options).filter(c => used.has(c));
+  const shown = channelList(local.options, wallets).filter(c => used.has(c));
   for (const c of used) if (!shown.includes(c)) shown.push(c);
   $('channelFilter').hidden = shown.length < 2 && !(shown.length === 1 && shown[0] !== CASH);
   chips($('channelFilter'), [['', '全部'], ...shown.map(c => [c, c])], filter, value => {
@@ -175,12 +207,8 @@ function drawHome() {
     }
     box.append(bar, legend);
   }
-  const rows = ledger(entries, setting, wallet)
-    .filter(
-      e =>
-        e.date.slice(0, 7) === month &&
-        (!filter || e.channel === filter || (e.type === '儲值' && filter === WALLET))
-    )
+  const rows = ledger(entries, setting, wallets)
+    .filter(e => e.date.slice(0, 7) === month && (!filter || e.channel === filter || e.to === filter))
     .reverse();
   const list = $('entryList');
   list.replaceChildren();
@@ -195,11 +223,10 @@ function drawHome() {
     for (const e of g.items) {
       const topup = e.type === '儲值';
       const transfer = e.type === '提款' || e.type === '存入' || topup;
-      // The balance shown is the one this record moves: LINE Pay for a top-up or a LINE Pay record, else cash.
-      const balance =
-        topup || e.channel === WALLET
-          ? e.walletCents != null && 'LINE Pay 餘 ' + signedYuan(e.walletCents)
-          : e.balanceCents != null && '餘 ' + signedYuan(e.balanceCents);
+      // The balance shown is the one this record moves: the wallet for a top-up or a wallet record, else cash.
+      const balance = e.wallet
+        ? e.walletCents != null && e.wallet + ' 餘 ' + signedYuan(e.walletCents)
+        : e.balanceCents != null && '餘 ' + signedYuan(e.balanceCents);
       list.append(
         row({
           category: transfer ? '' : e.category,
@@ -207,7 +234,7 @@ function drawHome() {
             e.type === '提款' ? '🏧' : e.type === '存入' ? '🏦' : topup ? '📲' : iconFor(e.category, e.type),
           tint: transfer ? '#8b8f96' : undefined,
           title: topup
-            ? '儲值 LINE Pay'
+            ? '儲值 ' + e.to
             : transfer
               ? e.type + (e.party ? '　' + e.party : '')
               : e.category.split('／').pop(),
@@ -229,13 +256,28 @@ function drawHome() {
 let type = '支出',
   category = '',
   channel = CASH,
+  to = DEFAULT_WALLETS[0],
   adding = null; // { kind, parent } while the add box is open
 function drawChannels() {
-  let list = channelList(local.options);
-  // A top-up comes from somewhere else into LINE Pay.
+  let list = channelList(local.options, local.wallets);
+  // A top-up moves money from one channel into a wallet, so the source cannot be that wallet.
   if (type === '儲值') {
-    list = list.filter(c => c !== WALLET);
-    if (channel === WALLET) channel = CASH;
+    const wallets = walletNames(local.wallets);
+    if (!wallets.includes(to))
+      to = local.state.lastTo && wallets.includes(local.state.lastTo) ? local.state.lastTo : wallets[0];
+    chips(
+      $('toRow'),
+      wallets.map(w => [w, w]),
+      to,
+      value => {
+        to = value;
+        local.state.lastTo = value;
+        local.save();
+        drawChannels();
+      }
+    );
+    list = list.filter(c => c !== to);
+    if (channel === to) channel = CASH;
   }
   if (!list.includes(channel)) list.push(channel);
   const plus = document.createElement('button');
@@ -265,6 +307,7 @@ function setType(t) {
   const transfer = t === '提款' || t === '存入';
   $('categoryButton').hidden = transfer || topup;
   $('channelRow').hidden = transfer;
+  $('channelLabel').hidden = $('toBox').hidden = !topup;
   closeAdder();
   $('partyLabel').textContent = transfer ? '銀行／帳戶' : '對象／商店';
   $('typeHint').hidden = !transfer && !topup;
@@ -274,7 +317,7 @@ function setType(t) {
       : t === '存入'
         ? '把現金存回銀行：現金減少，但不算支出。'
         : topup
-          ? '從上面選的帳戶轉進 LINE Pay：LINE Pay 增加、來源減少，不算支出。'
+          ? '從上面選的地方轉進錢包：錢包增加、來源減少，不算支出。'
           : '';
   if (transfer || topup) showPicker(false);
   drawChannels();
@@ -369,7 +412,7 @@ function addOption(input, statusId) {
   }
   const exists =
     o.kind === '渠道'
-      ? channelList(local.options).includes(o.name)
+      ? channelList(local.options, local.wallets).includes(o.name)
       : o.parent
         ? treeOf(type)
             .find(c => c.name === o.parent)
@@ -420,6 +463,7 @@ function keypad() {
 function fillForm(e = null) {
   editing = e;
   channel = e?.channel || local.state.lastChannel || CASH;
+  to = e?.to || local.state.lastTo || DEFAULT_WALLETS[0];
   drawChannels();
   setType(e?.type || '支出');
   setCategory(e?.category || '');
@@ -453,6 +497,7 @@ function saveForm(ev) {
       amount: $('amount').value,
       category,
       channel,
+      to: type === '儲值' ? to : '',
       party: $('party').value,
       note: $('note').value,
       createdAt: editing?.createdAt || now,
@@ -465,7 +510,7 @@ function saveForm(ev) {
   }
   const saved = local.put(entry);
   const label =
-    (entry.channel === CASH ? '' : entry.channel + ' ') +
+    (entry.to ? entry.channel + ' → ' + entry.to + ' ' : entry.channel === CASH ? '' : entry.channel + ' ') +
     (entry.category.split('／').pop() || entry.type) +
     ' ' +
     yuan(entry.amountCents);
@@ -487,7 +532,7 @@ function setCash(text, statusId, account = CASH) {
     $(statusId).textContent = '請填寫 0 以上的金額，最多到小數點後兩位。';
     return false;
   }
-  if (account === WALLET) local.setWalletSetting(cents, today());
+  if (account !== CASH) local.setWalletBalance(account, cents, today());
   else local.setSetting(cents, today());
   $(statusId).textContent =
     '已設定：' + today().replaceAll('-', '/') + ' 00:00 ' + account + ' ' + yuan(cents) + ' 元。';
@@ -553,15 +598,6 @@ function drawStatus() {
       signedYuan(cashNow(local.entries, s)) +
       ' 元。'
     : '還沒設定。';
-  const w = local.walletSetting;
-  $('walletLine').textContent = w
-    ? w.date.replaceAll('-', '/') +
-      ' 00:00 設定為 ' +
-      yuan(w.cents) +
-      ' 元；目前算出 ' +
-      signedYuan(balanceNow(local.entries, w, WALLET)) +
-      ' 元。可以和 LINE 裡顯示的餘額比對。'
-    : '還沒設定。設定後，渠道選 LINE Pay 的每一筆都會加減結餘。';
 }
 async function connect({ chooser = false } = {}) {
   if (syncing) return;
@@ -605,11 +641,11 @@ async function sync() {
   syncing = true;
   drawStatus();
   try {
-    const result = await store.sync(local.map, local.setting, local.options, local.walletSetting);
+    const result = await store.sync(local.map, local.setting, local.options, local.wallets);
     local.synced({
       entries: result.entries,
       setting: result.setting,
-      walletSetting: result.walletSetting,
+      wallets: result.wallets,
       options: result.options,
       fileId: result.fileId
     });
@@ -662,7 +698,96 @@ function route() {
   window.scrollTo(0, 0);
 }
 // Your own channels and categories, each with a ✕ to remove it.
+function drawWallets() {
+  const box = $('walletList');
+  box.replaceChildren();
+  const wallets = local.wallets;
+  for (const name of walletNames(wallets)) {
+    const w = wallets.get(name);
+    const set = w && w.cents != null;
+    const item = document.createElement('div');
+    item.className = 'wallet-item';
+    item.dataset.wallet = name;
+    const head = document.createElement('h3');
+    head.textContent = '📱 ' + name;
+    const line = document.createElement('p');
+    line.className = 'muted small';
+    line.textContent = set
+      ? w.date.replaceAll('-', '/') +
+        ' 00:00 設定為 ' +
+        yuan(w.cents) +
+        ' 元；目前算出 ' +
+        signedYuan(balanceNow(local.entries, w, name)) +
+        ' 元。'
+      : '還沒填起始餘額，填了才會算結餘。';
+    const form = document.createElement('form');
+    form.className = 'inline-form';
+    const input = document.createElement('input');
+    input.inputMode = 'decimal';
+    input.autocomplete = 'off';
+    input.placeholder = '裡面現在的錢（元）';
+    input.setAttribute('aria-label', name + ' 裡現在的錢（元）');
+    const ok = document.createElement('button');
+    ok.type = 'submit';
+    ok.textContent = '設定';
+    form.append(input, ok);
+    form.addEventListener('submit', ev => {
+      ev.preventDefault();
+      if (setCash(input.value, 'walletStatus', name)) input.value = '';
+    });
+    item.append(head, line, form);
+    if (!DEFAULT_WALLETS.includes(name)) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'secondary danger small-btn';
+      remove.textContent = '移除這個錢包';
+      remove.addEventListener('click', () => {
+        local.putWallet({ ...w, deleted: true, updatedAt: new Date().toISOString() });
+        if (filter === name) filter = '';
+        $('walletStatus').textContent =
+          '已移除錢包「' + name + '」。已經記下的帳不受影響，只是不再算它的結餘。';
+        refresh();
+        drawChannels();
+        queueSync();
+      });
+      item.append(remove);
+    }
+    box.append(item);
+  }
+}
+function addWallet() {
+  const name = $('walletName').value.trim();
+  const text = $('walletStart').value.trim();
+  const status = $('walletStatus');
+  if (walletNames(local.wallets).includes(name.replace(/／/g, '/'))) {
+    status.textContent = '已經有「' + name + '」這個錢包了。';
+    return;
+  }
+  const cents = text ? parseCents(text.replace(/,/g, '')) : null;
+  if (text && !Number.isSafeInteger(cents)) {
+    status.textContent = '請填寫 0 以上的金額，最多到小數點後兩位。';
+    return;
+  }
+  let w;
+  try {
+    w = makeWallet({ name, cents, date: cents == null ? '' : today() });
+  } catch (error) {
+    status.textContent = messages[error.message] || '請填寫錢包名稱。';
+    return;
+  }
+  local.putWallet(w);
+  $('walletName').value = $('walletStart').value = '';
+  status.textContent =
+    '已新增錢包「' +
+    w.name +
+    '」' +
+    (w.cents == null ? '，記得填起始餘額。' : '：今天 00:00 ' + yuan(w.cents) + ' 元。');
+  refresh();
+  drawChannels();
+  queueSync();
+}
 function drawSettings() {
+  drawWallets();
   const box = $('ownOptions');
   box.replaceChildren();
   const live = [...local.options.values()].filter(o => !o.deleted);
@@ -787,15 +912,9 @@ function init() {
     askedCash = false;
     askCash();
   });
-  $('walletForm').addEventListener('submit', e => {
+  $('walletAddForm').addEventListener('submit', e => {
     e.preventDefault();
-    if (setCash($('walletAmount').value, 'walletStatus', WALLET)) $('walletAmount').value = '';
-  });
-  $('walletShortcut').addEventListener('click', () => {
-    if (local.walletSetting) {
-      filter = WALLET;
-      drawHome();
-    } else location.hash = '#settings';
+    addWallet();
   });
   $('settingForm').addEventListener('submit', e => {
     e.preventDefault();
