@@ -6,6 +6,7 @@ import {
   monthSummary,
   parseCents,
   makeOption,
+  optionKey,
   channelList,
   categoryTree,
   CASH,
@@ -786,6 +787,125 @@ function addWallet() {
   drawChannels();
   queueSync();
 }
+// Icons offered when changing a category's icon in settings; any emoji can still be typed.
+const COMMON_ICONS = [
+  '🐶',
+  '🐱',
+  '👶',
+  '📚',
+  '✏️',
+  '💼',
+  '🏋️',
+  '⚽',
+  '🎮',
+  '🎵',
+  '📷',
+  '✈️',
+  '🚗',
+  '⛽',
+  '☕',
+  '🍺',
+  '🍰',
+  '🛒',
+  '👕',
+  '💇',
+  '💡',
+  '📱',
+  '💻',
+  '🏥',
+  '🎓',
+  '🙏',
+  '🎁',
+  '💰',
+  '🏦',
+  '📈',
+  '🧾',
+  '🔧',
+  '🌱',
+  '🐾',
+  '🧸',
+  '🏷️'
+];
+let editingIcon = ''; // optionKey of the category whose icon editor is open in settings
+function iconEditor(o) {
+  const box = document.createElement('div');
+  box.className = 'icon-editor';
+  const title = document.createElement('p');
+  title.className = 'row-label';
+  title.textContent = '「' + o.name + '」的圖案';
+  const grid = document.createElement('div');
+  grid.className = 'icon-grid';
+  grid.setAttribute('role', 'radiogroup');
+  grid.setAttribute('aria-label', o.name + '的圖案');
+  const save = icon => {
+    let next;
+    try {
+      next = makeOption({ ...o, icon, updatedAt: new Date().toISOString() });
+    } catch {
+      return;
+    }
+    local.putOption(next);
+    editingIcon = '';
+    $('optionStatus').textContent =
+      '「' + o.name + '」的圖案改成 ' + (next.icon || '🏷️') + '。已經記下的帳也會跟著換。';
+    queueSync();
+    refresh();
+    drawCategories();
+  };
+  for (const icon of COMMON_ICONS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'icon-choice';
+    b.textContent = icon;
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String((o.icon || '🏷️') === icon));
+    b.setAttribute('aria-label', icon);
+    b.addEventListener('click', () => save(icon));
+    grid.append(b);
+  }
+  const form = document.createElement('form');
+  form.className = 'inline-form';
+  const input = document.createElement('input');
+  input.maxLength = 4;
+  input.autocomplete = 'off';
+  input.placeholder = '或自己打一個表情符號';
+  input.setAttribute('aria-label', '自己輸入圖案');
+  const ok = document.createElement('button');
+  ok.type = 'submit';
+  ok.textContent = '套用';
+  form.append(input, ok);
+  form.addEventListener('submit', ev => {
+    ev.preventDefault();
+    if (input.value.trim()) save(input.value);
+  });
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'secondary danger small-btn';
+  remove.textContent = '移除這個分類';
+  remove.addEventListener('click', () => removeOption(o));
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'secondary small-btn';
+  close.textContent = '完成';
+  close.addEventListener('click', () => {
+    editingIcon = '';
+    drawSettings();
+  });
+  actions.append(close, remove);
+  box.append(title, grid, form, actions);
+  return box;
+}
+function removeOption(o) {
+  local.putOption({ ...o, deleted: true, updatedAt: new Date().toISOString() });
+  if (editingIcon === optionKey(o)) editingIcon = '';
+  $('optionStatus').textContent = '已移除「' + o.name + '」。已經記下的帳不受影響。';
+  queueSync();
+  refresh();
+  drawChannels();
+  drawCategories();
+}
 function drawSettings() {
   drawWallets();
   const box = $('ownOptions');
@@ -802,23 +922,33 @@ function drawSettings() {
     h.textContent = '自己新增的' + title;
     const wrap = document.createElement('div');
     wrap.className = 'chip-row wrap';
+    let editor = null;
     for (const o of list.sort((a, b) => (a.parent + a.name).localeCompare(b.parent + b.name))) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'chip removable';
-      b.textContent = (o.icon ? o.icon + ' ' : '') + (o.parent ? o.parent + '／' : '') + o.name + ' ✕';
-      b.setAttribute('aria-label', '移除 ' + (o.parent ? o.parent + '／' : '') + o.name);
-      b.addEventListener('click', () => {
-        local.putOption({ ...o, deleted: true, updatedAt: new Date().toISOString() });
-        $('optionStatus').textContent = '已移除「' + o.name + '」。已經記下的帳不受影響。';
-        queueSync();
-        refresh();
-        drawChannels();
-        drawCategories();
-      });
+      const label = (o.parent ? o.parent + '／' : '') + o.name;
+      // A main category opens its icon editor (which can also remove it); channels and sub-categories are removed directly.
+      if (o.kind !== '渠道' && !o.parent) {
+        const open = editingIcon === optionKey(o);
+        b.className = 'chip';
+        b.textContent = (o.icon || '🏷️') + ' ' + label + ' ✎';
+        b.setAttribute('aria-expanded', String(open));
+        b.setAttribute('aria-label', '修改「' + label + '」的圖案');
+        b.addEventListener('click', () => {
+          editingIcon = open ? '' : optionKey(o);
+          drawSettings();
+        });
+        if (open) editor = iconEditor(o);
+      } else {
+        b.className = 'chip removable';
+        b.textContent = label + ' ✕';
+        b.setAttribute('aria-label', '移除 ' + label);
+        b.addEventListener('click', () => removeOption(o));
+      }
       wrap.append(b);
     }
     box.append(h, wrap);
+    if (editor) box.append(editor);
   }
 }
 function refresh() {

@@ -914,3 +914,33 @@ input[type='month']::-webkit-date-and-time-value {
     grid-column: 1 / -1;
   }
 }
+
+.icon-editor {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+.icon-choice {
+  height: 40px;
+  padding: 0;
+  font-size: 20px;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.icon-choice[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+  background: var(--accent-soft);
+}
+.icon-editor .actions {
+  margin-top: 8px;
+}
