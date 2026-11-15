@@ -6,6 +6,7 @@ export const LOCAL_KEY = 'cash-ledger-v1';
 const empty = () => ({
   entries: [],
   setting: null,
+  walletSetting: null,
   options: [],
   pending: [],
   pendingOptions: [],
@@ -62,11 +63,19 @@ export class CashLocal {
   get setting() {
     return this.state.setting;
   }
+  get walletSetting() {
+    return this.state.walletSetting || null;
+  }
   get options() {
     return new Map(this.state.options.map(o => [optionKey(o), o]));
   }
   get pendingCount() {
-    return this.state.pending.length + this.state.pendingOptions.length + (this.state.settingPending ? 1 : 0);
+    return (
+      this.state.pending.length +
+      this.state.pendingOptions.length +
+      (this.state.settingPending ? 1 : 0) +
+      (this.state.walletSettingPending ? 1 : 0)
+    );
   }
   // Add or remove one of your own channels or categories.
   putOption(option) {
@@ -86,6 +95,11 @@ export class CashLocal {
   remove(entry, now = new Date().toISOString()) {
     return this.put({ ...entry, deleted: true, updatedAt: now });
   }
+  setWalletSetting(cents, date, now = new Date().toISOString()) {
+    this.state.walletSetting = { cents, date, updatedAt: now };
+    this.state.walletSettingPending = true;
+    return this.save();
+  }
   setSetting(cents, date, now = new Date().toISOString()) {
     this.state.setting = { cents, date, updatedAt: now };
     this.state.settingPending = true;
@@ -93,7 +107,20 @@ export class CashLocal {
   }
   // After a successful sync. `entries` and `setting` are what the sheet now holds; anything changed on this
   // device while the sync was running is newer, so it is kept and stays pending for the next sync.
-  synced({ entries, setting, options = new Map(), fileId, at = new Date().toISOString() }) {
+  synced({
+    entries,
+    setting,
+    walletSetting = null,
+    options = new Map(),
+    fileId,
+    at = new Date().toISOString()
+  }) {
+    const myWallet = this.state.walletSetting;
+    this.state.walletSettingPending = !!(
+      myWallet &&
+      (!walletSetting || myWallet.updatedAt > walletSetting.updatedAt)
+    );
+    this.state.walletSetting = this.state.walletSettingPending ? myWallet : walletSetting;
     const opts = new Map(options),
       pendingOptions = [];
     for (const o of this.state.options) {

@@ -825,3 +825,32 @@ input[type='month']::-webkit-date-and-time-value {
 #channelRow .chip {
   padding: 3px 11px;
 }
+.type-tabs {
+  grid-template-columns: repeat(5, 1fr);
+}
+.wallet-line {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 0 10px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-weight: 500;
+  text-align: left;
+}
+.wallet-line strong {
+  justify-self: end;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.wallet-line small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}

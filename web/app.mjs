@@ -8,7 +8,9 @@ import {
   makeOption,
   channelList,
   categoryTree,
-  CASH
+  CASH,
+  WALLET,
+  balanceNow
 } from '../cloud/cash.mjs';
 import { CashLocal } from '../cloud/cash-local.mjs';
 import { CashStore, SCOPE } from '../cloud/cash-store.mjs';
@@ -44,6 +46,7 @@ const messages = {
   CASH_AMOUNT: '請填寫大於 0 的金額，最多到小數點後兩位。',
   CASH_CATEGORY: '請選一個分類。',
   CASH_CHANNEL: '請選擇渠道。',
+  CASH_TOPUP: '儲值要選錢從哪裡來，不能選 LINE Pay。',
   OPTION_NAME: '請填寫名稱。',
   CASH_EXPRESSION: '金額算式看不懂，只支援數字與 + −。',
   GOOGLE_NETWORK: '連不上 Google，記帳已先存在這台裝置，有網路時再同步。',
@@ -114,6 +117,14 @@ function drawHome() {
     ? '從 ' + setting.date.replaceAll('-', '/') + ' 00:00 的 ' + yuan(setting.cents) + ' 起算'
     : '還沒設定起始現金';
   $('welcome').hidden = !!setting || store.connected || entries.length > 0;
+  // LINE Pay balance, kept like cash.
+  const wallet = local.walletSetting;
+  const walletCents = balanceNow(entries, wallet, WALLET);
+  $('walletNow').textContent = wallet ? signedYuan(walletCents) : '未設定';
+  $('walletNow').classList.toggle('out', !!wallet && walletCents < 0);
+  $('walletAnchor').textContent = wallet
+    ? '從 ' + wallet.date.replaceAll('-', '/') + ' 00:00 的 ' + yuan(wallet.cents) + ' 起算'
+    : '到設定填 LINE Pay 裡現在的錢';
   const used = new Set(entries.filter(e => !e.deleted && e.date.slice(0, 7) === month).map(e => e.channel));
   if (filter && !used.has(filter)) filter = '';
   const shown = channelList(local.options).filter(c => used.has(c));
@@ -129,8 +140,9 @@ function drawHome() {
   $('monthExpense').textContent = yuan(m.expenseCents);
   $('monthIncome').textContent = yuan(m.incomeCents);
   const when = (thisMonth ? '本月' : +month.slice(5) + ' 月') + (filter ? ' ' + filter : '');
-  $('monthExpense').previousElementSibling.textContent = when + '支出';
-  $('monthIncome').previousElementSibling.textContent = when + '收入';
+  const gap = filter ? ' ' : '';
+  $('monthExpense').previousElementSibling.textContent = when + gap + '支出';
+  $('monthIncome').previousElementSibling.textContent = when + gap + '收入';
   // Spending by category as one thin stacked bar with labels underneath.
   const box = $('monthBreakdown');
   box.replaceChildren();
@@ -154,6 +166,7 @@ function drawHome() {
     const extra = [];
     if (m.withdrawCents) extra.push('提款 ' + yuan(m.withdrawCents));
     if (m.depositCents) extra.push('存入 ' + yuan(m.depositCents));
+    if (m.topupCents) extra.push('儲值 ' + yuan(m.topupCents));
     if (extra.length) {
       const item = document.createElement('span');
       item.className = 'muted';
@@ -162,8 +175,12 @@ function drawHome() {
     }
     box.append(bar, legend);
   }
-  const rows = ledger(entries, setting)
-    .filter(e => e.date.slice(0, 7) === month && (!filter || e.channel === filter))
+  const rows = ledger(entries, setting, wallet)
+    .filter(
+      e =>
+        e.date.slice(0, 7) === month &&
+        (!filter || e.channel === filter || (e.type === '儲值' && filter === WALLET))
+    )
     .reverse();
   const list = $('entryList');
   list.replaceChildren();
@@ -176,19 +193,30 @@ function drawHome() {
   )) {
     list.append(dayHeader(g.date, g.cents));
     for (const e of g.items) {
-      const transfer = e.type === '提款' || e.type === '存入';
-      const cash = e.channel === CASH;
+      const topup = e.type === '儲值';
+      const transfer = e.type === '提款' || e.type === '存入' || topup;
+      // The balance shown is the one this record moves: LINE Pay for a top-up or a LINE Pay record, else cash.
+      const balance =
+        topup || e.channel === WALLET
+          ? e.walletCents != null && 'LINE Pay 餘 ' + signedYuan(e.walletCents)
+          : e.balanceCents != null && '餘 ' + signedYuan(e.balanceCents);
       list.append(
         row({
           category: transfer ? '' : e.category,
-          icon: e.type === '提款' ? '🏧' : e.type === '存入' ? '🏦' : iconFor(e.category, e.type),
+          icon:
+            e.type === '提款' ? '🏧' : e.type === '存入' ? '🏦' : topup ? '📲' : iconFor(e.category, e.type),
           tint: transfer ? '#8b8f96' : undefined,
-          title: transfer ? e.type + (e.party ? '　' + e.party : '') : e.category.split('／').pop(),
+          title: topup
+            ? '儲值 LINE Pay'
+            : transfer
+              ? e.type + (e.party ? '　' + e.party : '')
+              : e.category.split('／').pop(),
           sub:
-            [transfer ? '' : e.party, e.note].filter(Boolean).join('－') ||
+            [topup ? '從 ' + e.channel : '', transfer ? '' : e.party, e.note].filter(Boolean).join('－') ||
             (transfer ? '現金 ' + (e.type === '提款' ? '增加' : '減少') : ''),
-          cents: e.amountSigned,
-          side: (pending.has(e.id) ? '⏳ ' : '') + (cash ? '餘 ' + signedYuan(e.balanceCents) : e.channel),
+          cents: topup ? null : e.amountSigned,
+          amountText: topup ? yuan(e.amountCents) : undefined,
+          side: (pending.has(e.id) ? '⏳ ' : '') + (balance || e.channel),
           dim: transfer,
           onClick: () => openEditor(e)
         })
@@ -203,7 +231,12 @@ let type = '支出',
   channel = CASH,
   adding = null; // { kind, parent } while the add box is open
 function drawChannels() {
-  const list = channelList(local.options);
+  let list = channelList(local.options);
+  // A top-up comes from somewhere else into LINE Pay.
+  if (type === '儲值') {
+    list = list.filter(c => c !== WALLET);
+    if (channel === WALLET) channel = CASH;
+  }
   if (!list.includes(channel)) list.push(channel);
   const plus = document.createElement('button');
   plus.type = 'button';
@@ -228,19 +261,23 @@ function setType(t) {
   type = t;
   for (const b of document.querySelectorAll('.type-tab'))
     b.setAttribute('aria-selected', String(b.dataset.type === t));
+  const topup = t === '儲值';
   const transfer = t === '提款' || t === '存入';
-  $('categoryButton').hidden = transfer;
+  $('categoryButton').hidden = transfer || topup;
   $('channelRow').hidden = transfer;
   closeAdder();
   $('partyLabel').textContent = transfer ? '銀行／帳戶' : '對象／商店';
-  $('typeHint').hidden = !transfer;
+  $('typeHint').hidden = !transfer && !topup;
   $('typeHint').textContent =
     t === '提款'
       ? '從銀行領出現金：現金增加，但不算收入。'
       : t === '存入'
         ? '把現金存回銀行：現金減少，但不算支出。'
-        : '';
-  if (transfer) showPicker(false);
+        : topup
+          ? '從上面選的帳戶轉進 LINE Pay：LINE Pay 增加、來源減少，不算支出。'
+          : '';
+  if (transfer || topup) showPicker(false);
+  drawChannels();
   drawCategories();
 }
 function setCategory(c) {
@@ -444,15 +481,16 @@ function saveForm(ev) {
 }
 
 // ---------- Cash setting ----------
-function setCash(text, statusId) {
-  const cents = parseCents(text);
+function setCash(text, statusId, account = CASH) {
+  const cents = parseCents(String(text).replace(/,/g, ''));
   if (!Number.isSafeInteger(cents)) {
     $(statusId).textContent = '請填寫 0 以上的金額，最多到小數點後兩位。';
     return false;
   }
-  local.setSetting(cents, today());
+  if (account === WALLET) local.setWalletSetting(cents, today());
+  else local.setSetting(cents, today());
   $(statusId).textContent =
-    '已設定：' + today().replaceAll('-', '/') + ' 00:00 現金 ' + yuan(cents) + ' 元。';
+    '已設定：' + today().replaceAll('-', '/') + ' 00:00 ' + account + ' ' + yuan(cents) + ' 元。';
   refresh();
   queueSync();
   return true;
@@ -515,6 +553,15 @@ function drawStatus() {
       signedYuan(cashNow(local.entries, s)) +
       ' 元。'
     : '還沒設定。';
+  const w = local.walletSetting;
+  $('walletLine').textContent = w
+    ? w.date.replaceAll('-', '/') +
+      ' 00:00 設定為 ' +
+      yuan(w.cents) +
+      ' 元；目前算出 ' +
+      signedYuan(balanceNow(local.entries, w, WALLET)) +
+      ' 元。可以和 LINE 裡顯示的餘額比對。'
+    : '還沒設定。設定後，渠道選 LINE Pay 的每一筆都會加減結餘。';
 }
 async function connect({ chooser = false } = {}) {
   if (syncing) return;
@@ -558,10 +605,11 @@ async function sync() {
   syncing = true;
   drawStatus();
   try {
-    const result = await store.sync(local.map, local.setting, local.options);
+    const result = await store.sync(local.map, local.setting, local.options, local.walletSetting);
     local.synced({
       entries: result.entries,
       setting: result.setting,
+      walletSetting: result.walletSetting,
       options: result.options,
       fileId: result.fileId
     });
@@ -738,6 +786,16 @@ function init() {
   $('welcomeLocal').addEventListener('click', () => {
     askedCash = false;
     askCash();
+  });
+  $('walletForm').addEventListener('submit', e => {
+    e.preventDefault();
+    if (setCash($('walletAmount').value, 'walletStatus', WALLET)) $('walletAmount').value = '';
+  });
+  $('walletShortcut').addEventListener('click', () => {
+    if (local.walletSetting) {
+      filter = WALLET;
+      drawHome();
+    } else location.hash = '#settings';
   });
   $('settingForm').addEventListener('submit', e => {
     e.preventDefault();
