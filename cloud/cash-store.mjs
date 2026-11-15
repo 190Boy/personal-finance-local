@@ -25,7 +25,10 @@ import {
   detailRows,
   monthRows,
   settingRows,
-  readSetting
+  readSetting,
+  readWalletSetting,
+  balanceNow,
+  WALLET
 } from './cash.mjs';
 
 export const SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -168,9 +171,10 @@ export class CashStore {
     );
     return data.values || [];
   }
-  // local: Map of this device's records; localSetting: this device's cash setting (or null).
+  // local: Map of this device's records; localSetting / localWallet: this device's cash and LINE Pay
+  // starting balances (or null).
   // localOptions: Map of this device's own channels and categories.
-  async sync(local, localSetting, localOptions = new Map()) {
+  async sync(local, localSetting, localOptions = new Map(), localWallet = null) {
     if (!this.file) throw Error('GOOGLE_LOGIN_REQUIRED');
     const id = this.file.id;
     const remote = latest(readLog(await this.read(LOG_SHEET)));
@@ -183,7 +187,9 @@ export class CashStore {
       throw error;
     }
     for (const e of typed.changes) remote.set(e.id, e);
-    const remoteSetting = readSetting(await this.read(SETTING_SHEET));
+    const settingValues = await this.read(SETTING_SHEET);
+    const remoteSetting = readSetting(settingValues);
+    const walletSetting = mergeSetting(localWallet, readWalletSetting(settingValues));
     const merged0 = mergeEntries(local, remote);
     const merged = merged0.merged;
     // The sheet's own edits go into the log too, unless this device has an even newer version.
@@ -200,7 +206,7 @@ export class CashStore {
           ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',
         { method: 'POST', body: { values: upload.map(logRow) } }
       );
-    const rows = ledger(merged.values(), setting);
+    const rows = ledger(merged.values(), setting, walletSetting);
     await this.api(SHEETS + '/' + id + '/values:batchClear', {
       method: 'POST',
       body: { ranges: [DETAIL_SHEET, MONTH_SHEET, SETTING_SHEET, OPTION_SHEET].map(s => "'" + s + "'") }
@@ -215,7 +221,12 @@ export class CashStore {
           { range: "'" + OPTION_SHEET + "'!A1", values: optionRows(options) },
           {
             range: "'" + SETTING_SHEET + "'!A1",
-            values: settingRows(setting, cashNow(merged.values(), setting))
+            values: settingRows(
+              setting,
+              cashNow(merged.values(), setting),
+              walletSetting,
+              balanceNow(merged.values(), walletSetting, WALLET)
+            )
           }
         ]
       }
@@ -223,6 +234,7 @@ export class CashStore {
     return {
       entries: merged,
       setting,
+      walletSetting,
       options,
       uploaded: upload.length,
       fromSheet: typed.changes.length,

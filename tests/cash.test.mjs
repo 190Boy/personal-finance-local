@@ -23,6 +23,8 @@ import {
   channelList,
   categoryTree,
   readDetailEdits,
+  balanceNow,
+  readWalletSetting,
   LOG_HEADERS_V1,
   LOG_HEADERS,
   DETAIL_HEADERS
@@ -111,7 +113,7 @@ test('cash counts from 00:00 on the setting day forwards and is worked out backw
     '',
     1000
   ]);
-  assert.deepEqual(monthRows(rows)[1], ['2026-11', '現金', 620, 1000, 3000, 300, 6, 4580]);
+  assert.deepEqual(monthRows(rows)[1], ['2026-11', '現金', 620, 1000, 3000, 300, 0, 6, 4580]);
 });
 
 test('the newer version of a record or setting wins in either direction', () => {
@@ -137,7 +139,7 @@ test('the newer version of a record or setting wins in either direction', () => 
     settingRows(setting, 0)
       .find(r => r[0] === '資料格式版本')
       .slice(0, 2),
-    ['資料格式版本', 4]
+    ['資料格式版本', 5]
   );
 });
 
@@ -317,7 +319,7 @@ test('only cash records move the cash balance; other channels are listed for ref
   ]);
   const months = monthRows(rows).slice(1);
   assert.deepEqual(
-    months.map(r => [r[1], r[2], r[3], r[7]]),
+    months.map(r => [r[1], r[2], r[3], r[8]]),
     [
       ['現金', 200, 0, 3800],
       ['信用卡', 890, 0, ''],
@@ -500,7 +502,7 @@ test('a sync takes rows typed in the sheet, and refuses to overwrite a sheet wit
   const tea = [...r.entries.values()].find(x => x.party === '50嵐');
   assert.ok(tea && tea.id);
   // It now has an ID in the sheet and a row in the log.
-  assert.ok(book.values['記帳明細'].some(x => x[11] === tea.id));
+  assert.ok(book.values['記帳明細'].some(x => x[12] === tea.id));
   assert.ok(book.values['異動紀錄'].some(x => x[0] === tea.id));
   // A second sync changes nothing.
   r = await s.sync(r.entries, null);
@@ -513,4 +515,79 @@ test('a sync takes rows typed in the sheet, and refuses to overwrite a sheet wit
     e => e.message === 'SHEET_ROWS' && e.problems[0].row === book.values['記帳明細'].length
   );
   assert.equal(JSON.stringify(book.values), before);
+});
+
+test('LINE Pay keeps its own balance like cash; a top-up moves money from its source into LINE Pay', () => {
+  const cashSet = { cents: 300000, date: '2026-11-15', updatedAt: 'x' };
+  const walletSet = { cents: 233900, date: '2026-11-15', updatedAt: 'x' };
+  const list = [
+    e('支出', '2026-11-14', '50', { channel: 'LINE Pay' }),
+    e('支出', '2026-11-15', '85', { channel: 'LINE Pay', time: '09:00' }),
+    e('儲值', '2026-11-15', '1000', { channel: '現金', time: '10:00' }),
+    e('儲值', '2026-11-15', '2000', { channel: '玉山銀行', time: '11:00' }),
+    e('收入', '2026-11-16', '300', { channel: 'LINE Pay', category: '其他收入／收到轉帳' }),
+    e('支出', '2026-11-16', '120', { time: '12:00' })
+  ];
+  assert.throws(() => e('儲值', '2026-11-15', '1', { channel: 'LINE Pay' }), /CASH_TOPUP/);
+  assert.equal(list[2].category, '');
+  // LINE Pay: 2,339 − 85 + 1,000 + 2,000 + 300; the 11/14 payment is before the setting day.
+  assert.equal(balanceNow(list, walletSet, 'LINE Pay'), 233900 - 8500 + 100000 + 200000 + 30000);
+  // Cash: the top-up from cash takes 1,000 out; the bank top-up does not touch cash.
+  assert.equal(balanceNow(list, cashSet, '現金'), 300000 - 100000 - 12000);
+  const rows = ledger(list, cashSet, walletSet);
+  assert.deepEqual(
+    rows.map(r => [r.type, r.channel, r.balanceCents, r.walletCents]),
+    [
+      ['支出', 'LINE Pay', null, 233900],
+      ['支出', 'LINE Pay', null, 225400],
+      ['儲值', '現金', 200000, 325400],
+      ['儲值', '玉山銀行', null, 525400],
+      ['收入', 'LINE Pay', null, 555400],
+      ['支出', '現金', 188000, null]
+    ]
+  );
+  // 記帳明細 has the LINE Pay balance next to the cash balance.
+  const top = detailRows(rows)[3];
+  assert.deepEqual([top[2], top[3], top[5], top[10], top[11]], ['儲值', '現金', -1000, 2000, 3254]);
+  // 月份統計: top-ups are counted on the LINE Pay row, which also has its month-end balance.
+  const months = monthRows(rows).slice(1);
+  const lp = months.find(r => r[1] === 'LINE Pay'),
+    cash = months.find(r => r[1] === '現金');
+  assert.deepEqual([lp[2], lp[3], lp[6], lp[7], lp[8]], [135, 300, 3000, 5, 5554]);
+  assert.deepEqual([cash[2], cash[8]], [120, 1880]);
+  // The month summary: top-ups are not spending; filtering by LINE Pay includes them.
+  const m = monthSummary(list, '2026-11');
+  assert.deepEqual([m.expenseCents, m.incomeCents, m.topupCents], [25500, 30000, 300000]);
+  assert.equal(monthSummary(list, '2026-11', 'LINE Pay').topupCents, 300000);
+  assert.equal(monthSummary(list, '2026-11', '現金').topupCents, 100000);
+  // Both settings round-trip through the 設定 sheet.
+  const sheet = settingRows(cashSet, 0, walletSet, 0);
+  assert.deepEqual([readSetting(sheet), readWalletSetting(sheet)], [cashSet, walletSet]);
+  assert.equal(readWalletSetting(settingRows(cashSet, 0)), null);
+});
+
+test('the LINE Pay starting balance syncs through 設定 and reaches a second device', async () => {
+  const g = fakeGoogle();
+  const phone = new CashStore({ fetcher: g.fetcher });
+  phone.authorize('t', 3600);
+  await phone.open();
+  const wallet = { cents: 233900, date: '2026-11-15', updatedAt: '2026-11-15T09:00:00Z' };
+  const pay = e('支出', '2026-11-15', '85', { id: 'pay', channel: 'LINE Pay' });
+  let r = await phone.sync(new Map([['pay', pay]]), null, new Map(), wallet);
+  assert.deepEqual(r.walletSetting, wallet);
+  const book = g.books.get('sheet1');
+  const get = name => book.values['設定'].find(x => x[0] === name)?.[1];
+  assert.deepEqual([get('LINE Pay 起始餘額（元）'), get('LINE Pay 目前餘額（元）')], [2339, 2254]);
+  assert.equal(book.values['記帳明細'][1][11], 2254);
+  const tablet = new CashStore({ fetcher: g.fetcher });
+  tablet.authorize('t', 3600);
+  await tablet.open();
+  r = await tablet.sync(new Map(), null);
+  assert.deepEqual(r.walletSetting, wallet);
+  // On the phone, a newer local setting stays pending until the sheet has it.
+  const local = new CashLocal(memoryStorage());
+  local.setWalletSetting(100000, '2026-11-16', '2026-11-16T00:00:00Z');
+  local.synced({ entries: new Map(), setting: null, walletSetting: wallet, fileId: 'f' });
+  assert.equal(local.walletSetting.cents, 100000);
+  assert.equal(local.pendingCount, 1);
 });
