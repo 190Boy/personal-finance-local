@@ -741,3 +741,20 @@ export function readDetailEdits(
   });
   return { changes, problems };
 }
+
+// Search: every word of the query must appear in the record's store, note, category, channel,
+// destination wallet or type (full-width and half-width letters match, case is ignored). A word that
+// is a number also matches the amount exactly, so 「160」 finds a 160-元 record.
+const fold = text =>
+  String(text ?? '')
+    .normalize('NFKC')
+    .toLowerCase();
+export function searchWords(query) {
+  return fold(query).split(/\s+/).filter(Boolean);
+}
+export function matchesSearch(e, words) {
+  if (e.deleted || !words.length) return false;
+  const text = fold([e.party, e.note, e.category, e.channel, e.to, e.type].join(' '));
+  const amount = fold(e.amountCents / 100);
+  return words.every(w => text.includes(w) || w.replace(/,/g, '') === amount);
+}

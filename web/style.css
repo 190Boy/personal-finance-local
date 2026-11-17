@@ -973,3 +973,23 @@ input[type='month']::-webkit-date-and-time-value {
   grid-template-columns: minmax(0, 1fr) auto auto;
   margin-top: 12px;
 }
+
+.search-box {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+.search-box input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.search-box button {
+  margin: 0;
+  flex: none;
+}
+.search-summary {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}

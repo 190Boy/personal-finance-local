@@ -11,7 +11,9 @@
 - **沒有後端**。資料只存在使用者裝置（localStorage）和他自己的 Google 試算表。
 - **舊的完整版**：v0.16.1 以前有銀行、信用卡、股票、雲端發票、LINE Pay、報表等功能，保存在 `backup/full-v0.16.1` 分支，**不要刪**。
 
-目前版本：v1.6.1，資料格式版本 7。
+目前版本：v1.7.0，資料格式版本 7。
+
+- 搜尋：首頁搜尋框有字時，`drawHome()` 改列所有月份符合 `matchesSearch()` 的記帳（不管月份與渠道篩選），最多列最近 `SEARCH_LIMIT` 筆；比對商店、備註、分類、渠道、轉入、類型（NFKC＋不分大小寫），數字也比對金額（完全相等）。
 
 - 自動登入：純前端沒有 refresh token，所以做不到完全不點。App 開啟時若 localStorage 的 token 還有一分鐘以上就直接用（`resume()`）；否則登入過、且沒有按「登出」時，第一次點畫面任何地方就呼叫 `connect({ auto: true })`（`autoConnect()`，capture 階段，每次回到前景最多試一次；連接 Google 相關按鈕除外）。自動嘗試的彈窗失敗不顯示錯誤。登出、401、權限錯誤都會清掉 token。token 只有 `drive.file` 範圍、約一小時就失效，CSP 也只允許本站和 Google 登入元件的腳本，所以接受放在 localStorage 的風險。
 

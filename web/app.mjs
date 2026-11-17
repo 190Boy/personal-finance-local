@@ -9,6 +9,8 @@ import {
   optionKey,
   channelList,
   channelGroups,
+  searchWords,
+  matchesSearch,
   transferAccounts,
   CHANNEL_GROUPS,
   categoryTree,
@@ -219,12 +221,39 @@ function drawHome() {
     }
     box.append(bar, legend);
   }
-  const rows = ledger(entries, setting, wallets)
-    .filter(e => e.date.slice(0, 7) === month && (!filter || e.channel === filter || e.to === filter))
-    .reverse();
+  // Searching looks through every month and channel; the month view and its filters step aside.
+  const words = searchWords(query);
+  const searching = words.length > 0;
+  for (const id of ['monthStep', 'channelFilter', 'monthBreakdown']) $(id).hidden = searching;
+  $('searchClear').hidden = !query;
+  const all = ledger(entries, setting, wallets).filter(e =>
+    searching
+      ? matchesSearch(e, words)
+      : e.date.slice(0, 7) === month && (!filter || e.channel === filter || e.to === filter)
+  );
+  const shownRows = searching ? all.slice(-SEARCH_LIMIT) : all;
+  const rows = shownRows.reverse();
+  const summary = $('searchSummary');
+  summary.hidden = !searching;
+  if (searching) {
+    const out = all.filter(e => e.type === '支出').reduce((t, e) => t + e.amountCents, 0);
+    const inn = all.filter(e => e.type === '收入').reduce((t, e) => t + e.amountCents, 0);
+    summary.textContent = all.length
+      ? '找到 ' +
+        all.length +
+        ' 筆' +
+        (out ? '，支出 ' + yuan(out) : '') +
+        (inn ? '，收入 ' + yuan(inn) : '') +
+        (all.length > SEARCH_LIMIT ? '。只列出最近的 ' + SEARCH_LIMIT + ' 筆，多打幾個字可以縮小範圍' : '') +
+        '。'
+      : '';
+  }
   const list = $('entryList');
   list.replaceChildren();
   $('listEmpty').hidden = rows.length > 0;
+  $('listEmpty').textContent = searching
+    ? '找不到符合「' + query.trim() + '」的記帳。'
+    : '這個月還沒有現金記帳。按下方的 ＋ 記一筆。';
   const pending = new Set(local.state.pending);
   for (const g of groupByDay(
     rows,
@@ -265,6 +294,9 @@ function drawHome() {
 }
 
 // ---------- Entry form ----------
+// The search box text; when it has words, the home list shows matches from every month.
+let query = '';
+const SEARCH_LIMIT = 300;
 let type = '支出',
   category = '',
   channel = CASH,
@@ -1225,6 +1257,18 @@ function init() {
     refresh();
     queueSync();
     location.hash = '#home';
+  });
+  $('search').addEventListener('input', () => {
+    query = $('search').value;
+    drawHome();
+  });
+  $('searchForm').addEventListener('submit', e => {
+    e.preventDefault();
+    $('search').blur(); // close the phone keyboard to see the results
+  });
+  $('searchClear').addEventListener('click', () => {
+    $('search').value = query = '';
+    drawHome();
   });
   $('prevMonth').addEventListener('click', () => {
     month = shiftMonth(month, -1);

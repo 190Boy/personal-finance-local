@@ -22,6 +22,8 @@ import {
   optionRows,
   channelList,
   channelGroups,
+  searchWords,
+  matchesSearch,
   transferAccounts,
   categoryTree,
   readDetailEdits,
@@ -729,4 +731,31 @@ test('channels sit in editable groups, and 提款／存入 pick an account from 
   assert.deepEqual(readOptions(optionRows(options)), options);
   assert.equal(makeOption({ kind: '渠道', name: 'X', parent: '亂寫' }).parent, '');
   assert.throws(() => makeOption({ kind: '渠道', name: '現金' }), /OPTION_CASH/);
+});
+
+test('search finds records by store, note, category, channel or exact amount, every word needed', () => {
+  const lunch = e('支出', '2026-10-02', '160', {
+    party: '全聯福利中心',
+    note: '晚餐 便當',
+    channel: '玉山銀行'
+  });
+  const tea = e('支出', '2026-11-03', '1,250', {
+    party: 'ＳＴＡＲＢＵＣＫＳ',
+    category: '餐飲／飲料',
+    channel: 'LINE Pay'
+  });
+  const top = e('儲值', '2026-11-04', '500', { channel: '現金', to: 'LINE Pay' });
+  const find = q =>
+    [lunch, tea, top].filter(x => matchesSearch(x, searchWords(q))).map(x => x.amountCents / 100);
+  assert.deepEqual(find('全聯'), [160]);
+  assert.deepEqual(find('便當'), [160]); // note
+  assert.deepEqual(find('starbucks'), [1250]); // full-width, any case
+  assert.deepEqual(find('飲料'), [1250]); // sub-category
+  assert.deepEqual(find('line pay'), [1250, 500]); // channel and top-up destination
+  assert.deepEqual(find('全聯 晚餐'), [160]);
+  assert.deepEqual(find('全聯 飲料'), []);
+  assert.deepEqual(find('1,250'), [1250]);
+  assert.deepEqual(find('16'), []); // amounts match exactly, not by part
+  assert.deepEqual(find('   '), []);
+  assert.equal(matchesSearch({ ...lunch, deleted: true }, searchWords('全聯')), false);
 });
