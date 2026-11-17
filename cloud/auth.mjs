@@ -1,4 +1,4 @@
-// Google 登入：載入 Google 官方授權元件，按下按鈕時才跳出授權視窗。Token 只放在記憶體。
+// Google 登入：載入 Google 官方授權元件，使用者點擊時才跳出授權視窗。Token 的保存見 login-preferences.mjs。
 import { GOOGLE_CLIENT_ID } from './config.mjs';
 
 let gisPromise = null;
