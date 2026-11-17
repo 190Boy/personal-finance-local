@@ -18,7 +18,7 @@
 </head>
 <body>
 <a class="skip" href="#main">跳到主要內容</a>
-<header class="topbar"><div class="wrap topbar-in"><img src="./icons/icon-192.png" alt="" width="28" height="28"><strong>現金記帳</strong><span class="version" id="appVersion">v1.6.1</span><button id="syncChip" class="sync-chip" type="button" aria-live="polite">未連接</button></div></header>
+<header class="topbar"><div class="wrap topbar-in"><img src="./icons/icon-192.png" alt="" width="28" height="28"><strong>現金記帳</strong><span class="version" id="appVersion">v1.7.0</span><button id="syncChip" class="sync-chip" type="button" aria-live="polite">未連接</button></div></header>
 <main id="main" class="wrap">
 
 <section id="view-home" data-route="home" hidden>
@@ -26,7 +26,7 @@
 <p id="syncNotice" class="notice" role="status" aria-live="polite" hidden></p>
 <div id="walletCards" class="wallet-cards" aria-label="錢包結餘"></div>
 <section id="welcome" class="card welcome" hidden><h2>先數一下錢包</h2><p>現金沒有對帳單，需要一個起點。連接 Google 後會先問你身上有多少現金，記帳也會自動同步到你雲端硬碟裡的「現金記帳」試算表。</p><div class="actions"><button id="welcomeConnect" type="button">連接 Google</button><button id="welcomeLocal" type="button" class="secondary">先不連接，直接設定現金</button></div></section>
-<div class="month-step"><button id="prevMonth" type="button" class="icon-btn" aria-label="上個月">◀</button><strong id="monthLabel"></strong><button id="nextMonth" type="button" class="icon-btn" aria-label="下個月">▶</button></div>
+<form id="searchForm" class="search-box" role="search"><input id="search" type="search" autocomplete="off" enterkeyhint="search" placeholder="🔍 搜尋商店、備註、分類、金額" aria-label="搜尋記帳"><button id="searchClear" type="button" class="secondary" hidden>取消</button></form><p id="searchSummary" class="search-summary" role="status" aria-live="polite" hidden></p><div id="monthStep" class="month-step"><button id="prevMonth" type="button" class="icon-btn" aria-label="上個月">◀</button><strong id="monthLabel"></strong><button id="nextMonth" type="button" class="icon-btn" aria-label="下個月">▶</button></div>
 <div id="channelFilter" class="chip-row filter" role="radiogroup" aria-label="依渠道篩選"></div>
 <div id="monthBreakdown" class="breakdown"></div>
 <div id="entryList" class="row-list"></div>
@@ -58,7 +58,7 @@
 <section class="card"><h2>錢包</h2><p class="small muted">錢包和現金一樣有自己的結餘：填進去的金額記成今天 00:00，之後渠道選這個錢包的支出會扣、收入會加，「儲值」轉進來會加。每一筆都記，結餘才會和 App 裡顯示的一致。</p><div id="walletList" class="wallet-list"></div><form id="walletAddForm" class="inline-form wallet-add"><label class="field">新增錢包<input id="walletName" maxlength="20" autocomplete="off" placeholder="例如 悠遊卡"></label><label class="field">現在裡面的錢（元，選填）<input id="walletStart" inputmode="decimal" autocomplete="off" placeholder="之後再填也可以"></label><button type="submit">新增</button></form><p id="walletStatus" class="status" role="status" aria-live="polite"></p></section>
 <section class="card"><h2>渠道與分類</h2><p class="small muted">渠道分成銀行、信用卡、其他幾組；點一個渠道可以換組或移除，預設的也可以。「提款」「存入」會從銀行、信用卡、其他裡選帳戶。現金和錢包會算結餘（錢包在上面管理）；銀行和信用卡的記帳是給 BOT 對帳用的參考。</p><div id="channelGroups" class="channel-groups"></div><form id="channelForm" class="inline-form channel-add"><label class="field">新增渠道<input id="channelName" maxlength="20" autocomplete="off" placeholder="例如 台新銀行"></label><label class="field">放在<select id="channelGroup"><option>銀行</option><option>信用卡</option><option>其他</option></select></label><button type="submit">新增</button></form><p class="small muted">自己的分類和子分類，可以在記一筆的分類裡按「＋ 新增」加入；點下面自己新增的分類可以改圖案。</p><div id="ownOptions" class="own-options"></div><p id="optionStatus" class="status" role="status" aria-live="polite"></p></section>
 <section class="card"><h2>這台裝置</h2><p class="small muted">記帳會先存在這台裝置，連上 Google 後再同步，所以沒網路也能記。登出不會刪除這裡的記帳。</p><div class="actions"><button id="clearLocal" type="button" class="secondary danger">清除這台裝置的記帳</button><button id="installApp" type="button" class="secondary" hidden>加入主畫面</button></div><p id="localStatus" class="status" role="status" aria-live="polite"></p><p id="pwaStatus" class="small muted"></p></section>
-<p class="small muted">v1.6.1 · 現金與錢包記帳並算結餘，其他渠道供對帳參考。銀行、信用卡、股票等可匯出檔案的資料交給 BOT 整理。先前的完整版保存在 GitHub 的 backup/full-v0.16.1 分支。</p>
+<p class="small muted">v1.7.0 · 現金與錢包記帳並算結餘，其他渠道供對帳參考。銀行、信用卡、股票等可匯出檔案的資料交給 BOT 整理。先前的完整版保存在 GitHub 的 backup/full-v0.16.1 分支。</p>
 </section>
 </main>
 
