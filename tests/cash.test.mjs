@@ -21,6 +21,8 @@ import {
   readOptions,
   optionRows,
   channelList,
+  channelGroups,
+  transferAccounts,
   categoryTree,
   readDetailEdits,
   makeWallet,
@@ -146,7 +148,7 @@ test('the newer version of a record or setting wins in either direction', () => 
     settingRows(setting, 0)
       .find(r => r[0] === '資料格式版本')
       .slice(0, 2),
-    ['資料格式版本', 6]
+    ['資料格式版本', 7]
   );
 });
 
@@ -350,33 +352,12 @@ test('your own channels and categories merge by last change and add to the built
   );
   const removed = makeOption({ kind: '渠道', name: '悠遊卡', deleted: true, updatedAt: at(2) });
   const merged = mergeOptions(local, new Map([[optionKey(removed), removed]]));
-  assert.deepEqual(channelList(merged), [
-    '現金',
-    '玉山銀行',
-    '中信銀行',
-    '凱基信用卡',
-    '中信信用卡',
-    'LINE Pay'
-  ]);
-  assert.deepEqual(channelList(local), [
-    '現金',
-    '玉山銀行',
-    '中信銀行',
-    '凱基信用卡',
-    '中信信用卡',
-    'LINE Pay',
-    '悠遊卡'
-  ]);
+  const defaults = ['現金', 'LINE Pay', '玉山銀行', '中信銀行', '凱基信用卡', '中信信用卡'];
+  assert.deepEqual(channelList(merged), defaults);
+  assert.deepEqual(channelList(local), [...defaults, '悠遊卡']);
   // A channel you added yourself that is now a default appears once.
   const dup = makeOption({ kind: '渠道', name: '玉山銀行' });
-  assert.deepEqual(channelList(new Map([[optionKey(dup), dup]])), [
-    '現金',
-    '玉山銀行',
-    '中信銀行',
-    '凱基信用卡',
-    '中信信用卡',
-    'LINE Pay'
-  ]);
+  assert.deepEqual(channelList(new Map([[optionKey(dup), dup]])), defaults);
   const spend = categoryTree(CATEGORY_TREE.支出, merged, '支出');
   const pet = spend.find(c => c.name === '寵物');
   assert.deepEqual([pet.icon, pet.subs, pet.own], ['🐶', ['飼料'], true]);
@@ -701,4 +682,51 @@ test('a v1.4.0 sheet and phone move the LINE Pay starting balance into the walle
   assert.equal(r.entries.get('old').to, 'LINE Pay');
   assert.equal(book.values['錢包'].find(x => x[0] === 'LINE Pay')[4], 1844);
   assert.equal(book.values['異動紀錄'][0].at(-1), '轉入');
+});
+
+test('channels sit in editable groups, and 提款／存入 pick an account from banks, cards and others', () => {
+  const at = t => '2026-11-17T0' + t + ':00:00Z';
+  const opts = (...list) => new Map(list.map(o => [optionKey(o), o]));
+  const wallets = new Map([['悠遊卡', makeWallet({ name: '悠遊卡' })]]);
+  const bank = makeOption({ kind: '渠道', name: '台新銀行', parent: '銀行', updatedAt: at(1) });
+  const old = makeOption({ kind: '渠道', name: '街口', updatedAt: at(1) }); // added before groups existed
+  let options = opts(bank, old);
+  assert.deepEqual(channelGroups(options, wallets), [
+    ['現金', ['現金']],
+    ['錢包', ['LINE Pay', '悠遊卡']],
+    ['銀行', ['玉山銀行', '中信銀行', '台新銀行']],
+    ['信用卡', ['凱基信用卡', '中信信用卡']],
+    ['其他', ['街口']]
+  ]);
+  assert.deepEqual(transferAccounts(options, wallets), [
+    '玉山銀行',
+    '中信銀行',
+    '台新銀行',
+    '凱基信用卡',
+    '中信信用卡',
+    '街口'
+  ]);
+  // Moving a channel keeps one row (the group is not part of the key); a default can be moved or removed.
+  const moved = makeOption({ ...old, parent: '銀行', updatedAt: at(2) });
+  assert.equal(optionKey(moved), optionKey(old));
+  const gone = makeOption({
+    kind: '渠道',
+    name: '中信銀行',
+    parent: '銀行',
+    deleted: true,
+    updatedAt: at(2)
+  });
+  const card = makeOption({ kind: '渠道', name: '凱基信用卡', parent: '其他', updatedAt: at(2) });
+  options = mergeOptions(opts(moved, gone, card), options);
+  assert.deepEqual(transferAccounts(options, wallets), [
+    '玉山銀行',
+    '台新銀行',
+    '街口',
+    '中信信用卡',
+    '凱基信用卡'
+  ]);
+  // Groups round-trip through the 選項 sheet, and 現金 cannot be a channel option.
+  assert.deepEqual(readOptions(optionRows(options)), options);
+  assert.equal(makeOption({ kind: '渠道', name: 'X', parent: '亂寫' }).parent, '');
+  assert.throws(() => makeOption({ kind: '渠道', name: '現金' }), /OPTION_CASH/);
 });
