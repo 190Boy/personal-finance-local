@@ -64,7 +64,7 @@ export const MONTH_HEADERS = [
   '月底餘額（元）'
 ];
 // 試算表欄位或資料意義有變時加 1，並同步更新 BOT 說明書（見 README）。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）；3 = v1.2.0 起（記帳明細可直接打字）；4 = v1.3.0 起（預設渠道指定銀行與信用卡）；5 = v1.4.0 起（LINE Pay 結餘、儲值）；6 = v1.5.0 起（多個錢包、轉入、錢包工作表）。
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 export const SETTING_SHEET = '設定';
 export const SETTING_HEADERS = ['項目', '內容', '說明'];
 // 每個錢包一列：起始餘額與日期（空白表示還沒設定）、目前餘額；刪掉的錢包狀態是「已刪除」。
@@ -81,6 +81,14 @@ export const WALLET_HEADERS = [
 export const OPTION_SHEET = '選項';
 export const OPTION_HEADERS = ['種類', '名稱', '上層', '圖示', '狀態', '更新時間'];
 export const OPTION_KINDS = ['渠道', '支出分類', '收入分類'];
+// Channel groups you can put a channel in. 現金 and wallets are groups of their own and are not set here.
+export const CHANNEL_GROUPS = ['銀行', '信用卡', '其他'];
+export const DEFAULT_CHANNEL_GROUP = {
+  玉山銀行: '銀行',
+  中信銀行: '銀行',
+  凱基信用卡: '信用卡',
+  中信信用卡: '信用卡'
+};
 
 const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -476,9 +484,11 @@ export function monthRows(rows) {
 
 // ---------- Your own channels and categories ----------
 // An option is { kind: 渠道|支出分類|收入分類, name, parent, icon, deleted, updatedAt }.
-// A sub-category has the main category's name in parent. Removing one keeps a row marked 已刪除 so other
-// devices learn about it.
-export const optionKey = o => o.kind + '\u0000' + (o.parent || '') + '\u0000' + o.name;
+// A sub-category has the main category's name in parent. For a channel, parent is its group (銀行／信用卡／
+// 其他; blank means the default group), and is not part of the key, so moving a channel keeps one row.
+// Removing one keeps a row marked 已刪除 so other devices learn about it; a default channel can be removed too.
+export const optionKey = o =>
+  o.kind + '\u0000' + (o.kind === '渠道' ? '' : o.parent || '') + '\u0000' + o.name;
 export function makeOption(input, now = new Date().toISOString()) {
   const o = {
     kind: String(input.kind || ''),
@@ -495,7 +505,10 @@ export function makeOption(input, now = new Date().toISOString()) {
   };
   if (!OPTION_KINDS.includes(o.kind)) throw Error('OPTION_KIND');
   if (!o.name) throw Error('OPTION_NAME');
-  if (o.kind === '渠道') o.parent = '';
+  if (o.kind === '渠道') {
+    if (o.name === CASH) throw Error('OPTION_CASH');
+    if (!CHANNEL_GROUPS.includes(o.parent)) o.parent = '';
+  }
   return o;
 }
 export function mergeOptions(local, remote) {
@@ -537,11 +550,29 @@ export function readOptions(values) {
   }
   return out;
 }
-// The channel list: the four defaults, then your own.
-// Channels to pick from: the defaults, your own channels, and every wallet.
+// Channels by group, in the order they are shown: 現金, wallets, 銀行, 信用卡, 其他.
+// Default channels can be moved to another group or removed through an option row with their name.
+export function channelGroups(options, wallets = new Map()) {
+  const inWallets = new Set(walletNames(wallets));
+  const groups = new Map(CHANNEL_GROUPS.map(g => [g, []]));
+  const own = [...options.values()].filter(o => o.kind === '渠道').map(o => o.name);
+  for (const name of new Set([...DEFAULT_CHANNELS, ...own])) {
+    if (name === CASH || inWallets.has(name)) continue;
+    const row = options.get(optionKey({ kind: '渠道', name }));
+    if (row?.deleted) continue;
+    groups.get(row?.parent || DEFAULT_CHANNEL_GROUP[name] || '其他').push(name);
+  }
+  return [[CASH, [CASH]], ['錢包', [...inWallets]], ...groups];
+}
+// Channels to pick from: 現金, every wallet, then banks, cards and the rest.
 export function channelList(options, wallets = new Map()) {
-  const own = [...options.values()].filter(o => o.kind === '渠道' && !o.deleted).map(o => o.name);
-  return [...new Set([...DEFAULT_CHANNELS, ...own, ...walletNames(wallets)])];
+  return channelGroups(options, wallets).flatMap(([, names]) => names);
+}
+// Accounts a 提款 comes from or a 存入 goes to: banks first, never 現金 or a wallet (use 儲值 for a wallet).
+export function transferAccounts(options, wallets = new Map()) {
+  return channelGroups(options, wallets)
+    .filter(([g]) => CHANNEL_GROUPS.includes(g))
+    .flatMap(([, names]) => names);
 }
 // The category tree for 支出 or 收入: built-in categories plus your own main and sub categories.
 export function categoryTree(base, options, type) {

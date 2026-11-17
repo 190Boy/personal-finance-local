@@ -8,6 +8,9 @@ import {
   makeOption,
   optionKey,
   channelList,
+  channelGroups,
+  transferAccounts,
+  CHANNEL_GROUPS,
   categoryTree,
   CASH,
   DEFAULT_WALLETS,
@@ -50,6 +53,7 @@ const messages = {
   CASH_CATEGORY: '請選一個分類。',
   CASH_CHANNEL: '請選擇渠道。',
   CASH_TOPUP: '儲值的來源和轉入不能是同一個錢包。',
+  OPTION_CASH: '「現金」是內建的，不用新增。',
   WALLET_CASH: '「現金」已經有自己的結餘，錢包請取別的名字。',
   OPTION_NAME: '請填寫名稱。',
   CASH_EXPRESSION: '金額算式看不懂，只支援數字與 + −。',
@@ -258,6 +262,7 @@ let type = '支出',
   category = '',
   channel = CASH,
   to = DEFAULT_WALLETS[0],
+  account = '', // the bank or other account of a 提款／存入, saved as 對象
   adding = null; // { kind, parent } while the add box is open
 function drawChannels() {
   let list = channelList(local.options, local.wallets);
@@ -279,6 +284,32 @@ function drawChannels() {
     );
     list = list.filter(c => c !== to);
     if (channel === to) channel = CASH;
+  }
+  if (type === '提款' || type === '存入') {
+    const accounts = transferAccounts(local.options, local.wallets);
+    if (!account)
+      account = accounts.includes(local.state.lastAccount) ? local.state.lastAccount : accounts[0] || '';
+    // A record from before the list existed may name an account that is not in it.
+    if (account && !accounts.includes(account)) accounts.push(account);
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'chip add';
+    add.textContent = '＋';
+    add.setAttribute('aria-label', '新增銀行或帳戶');
+    add.addEventListener('click', () => openAdder({ kind: '渠道', parent: '銀行', forAccount: true }));
+    chips(
+      $('accountRow'),
+      accounts.map(a => [a, a]),
+      account,
+      value => {
+        // Tap the chosen one again to leave the account blank.
+        account = value === account ? '' : value;
+        if (account) local.state.lastAccount = account;
+        local.save();
+        drawChannels();
+      },
+      add
+    );
   }
   if (!list.includes(channel)) list.push(channel);
   const plus = document.createElement('button');
@@ -310,7 +341,9 @@ function setType(t) {
   $('channelRow').hidden = transfer;
   $('channelLabel').hidden = $('toBox').hidden = !topup;
   closeAdder();
-  $('partyLabel').textContent = transfer ? '銀行／帳戶' : '對象／商店';
+  $('accountBox').hidden = !transfer;
+  $('partyField').hidden = transfer;
+  $('accountLabel').textContent = t === '提款' ? '從哪個帳戶領出' : '存進哪個帳戶';
   $('typeHint').hidden = !transfer && !topup;
   $('typeHint').textContent =
     t === '提款'
@@ -389,6 +422,8 @@ function openAdder(what) {
   adding = what;
   $('optionAdder').hidden = false;
   $('optionIcon').hidden = !(what.kind !== '渠道' && !what.parent);
+  $('optionGroup').hidden = what.kind !== '渠道';
+  if (what.kind === '渠道') $('optionGroup').value = what.parent || '其他';
   $('optionAdderLabel').textContent =
     what.kind === '渠道'
       ? '新增渠道'
@@ -465,6 +500,7 @@ function fillForm(e = null) {
   editing = e;
   channel = e?.channel || local.state.lastChannel || CASH;
   to = e?.to || local.state.lastTo || DEFAULT_WALLETS[0];
+  account = e && (e.type === '提款' || e.type === '存入') ? e.party : '';
   drawChannels();
   setType(e?.type || '支出');
   setCategory(e?.category || '');
@@ -499,7 +535,7 @@ function saveForm(ev) {
       category,
       channel,
       to: type === '儲值' ? to : '',
-      party: $('party').value,
+      party: type === '提款' || type === '存入' ? account : $('party').value,
       note: $('note').value,
       createdAt: editing?.createdAt || now,
       updatedAt: now
@@ -906,13 +942,107 @@ function removeOption(o) {
   drawChannels();
   drawCategories();
 }
+let editingChannel = ''; // name of the channel whose group editor is open in settings
+function channelEditor(name, group) {
+  const box = document.createElement('div');
+  box.className = 'icon-editor';
+  const title = document.createElement('p');
+  title.className = 'row-label';
+  title.textContent = '「' + name + '」放在哪一組';
+  const row = document.createElement('div');
+  row.className = 'chip-row wrap';
+  const save = patch => {
+    const key = optionKey({ kind: '渠道', name });
+    const o = makeOption({
+      kind: '渠道',
+      name,
+      parent: group,
+      ...local.options.get(key),
+      ...patch,
+      updatedAt: new Date().toISOString()
+    });
+    local.putOption(o);
+    editingChannel = '';
+    $('optionStatus').textContent = o.deleted
+      ? '已移除渠道「' + name + '」。已經記下的帳不受影響；之後想用，再新增一次同樣的名字就好。'
+      : '已把「' + name + '」移到' + o.parent + '。';
+    queueSync();
+    refresh();
+    drawChannels();
+  };
+  chips(
+    row,
+    CHANNEL_GROUPS.map(g => [g, g]),
+    group,
+    g => save({ parent: g, deleted: false })
+  );
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'secondary small-btn';
+  close.textContent = '完成';
+  close.addEventListener('click', () => {
+    editingChannel = '';
+    drawSettings();
+  });
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'secondary danger small-btn';
+  remove.textContent = '移除這個渠道';
+  remove.addEventListener('click', () => save({ parent: group, deleted: true }));
+  actions.append(close, remove);
+  box.append(title, row, actions);
+  return box;
+}
+function drawChannelGroups() {
+  const box = $('channelGroups');
+  box.replaceChildren();
+  for (const [group, names] of channelGroups(local.options, local.wallets)) {
+    const h = document.createElement('h3');
+    h.textContent = group;
+    const wrap = document.createElement('div');
+    wrap.className = 'chip-row wrap';
+    let editor = null;
+    for (const name of names) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = name;
+      // 現金 is built in and wallets are managed in the 錢包 card, so only banks, cards and others are editable here.
+      if (CHANNEL_GROUPS.includes(group)) {
+        const open = editingChannel === name;
+        b.textContent += ' ✎';
+        b.setAttribute('aria-expanded', String(open));
+        b.setAttribute('aria-label', '調整渠道「' + name + '」');
+        b.addEventListener('click', () => {
+          editingChannel = open ? '' : name;
+          drawSettings();
+        });
+        if (open) editor = channelEditor(name, group);
+      } else {
+        b.disabled = true;
+        b.classList.add('fixed');
+      }
+      wrap.append(b);
+    }
+    if (!names.length) {
+      const none = document.createElement('span');
+      none.className = 'small muted';
+      none.textContent = '（沒有）';
+      wrap.append(none);
+    }
+    box.append(h, wrap);
+    if (editor) box.append(editor);
+  }
+}
 function drawSettings() {
   drawWallets();
+  drawChannelGroups();
   const box = $('ownOptions');
   box.replaceChildren();
   const live = [...local.options.values()].filter(o => !o.deleted);
   const groups = [
-    ['渠道', live.filter(o => o.kind === '渠道')],
     ['支出分類', live.filter(o => o.kind === '支出分類')],
     ['收入分類', live.filter(o => o.kind === '收入分類')]
   ];
@@ -972,11 +1102,24 @@ function init() {
   const submitAdder = () => {
     if (!adding) return;
     const what = adding;
-    const o = addOption({ ...what, name: $('optionName').value, icon: $('optionIcon').value }, 'formStatus');
+    const o = addOption(
+      {
+        kind: what.kind,
+        parent: what.kind === '渠道' ? $('optionGroup').value : what.parent,
+        name: $('optionName').value,
+        icon: $('optionIcon').value
+      },
+      'formStatus'
+    );
     if (!o) return;
     closeAdder();
     $('formStatus').textContent = '已新增「' + o.name + '」。';
-    if (o.kind === '渠道') {
+    if (what.forAccount) {
+      account = o.name;
+      local.state.lastAccount = o.name;
+      local.save();
+      drawChannels();
+    } else if (o.kind === '渠道') {
       channel = o.name;
       local.state.lastChannel = o.name;
       local.save();
@@ -998,10 +1141,13 @@ function init() {
   });
   $('channelForm').addEventListener('submit', e => {
     e.preventDefault();
-    const o = addOption({ kind: '渠道', name: $('channelName').value }, 'optionStatus');
+    const o = addOption(
+      { kind: '渠道', name: $('channelName').value, parent: $('channelGroup').value },
+      'optionStatus'
+    );
     if (!o) return;
     $('channelName').value = '';
-    $('optionStatus').textContent = '已新增渠道「' + o.name + '」。';
+    $('optionStatus').textContent = '已把「' + o.name + '」加到' + o.parent + '。';
     drawChannels();
   });
   $('prevDay').addEventListener('click', () => ($('date').value = shiftDay($('date').value || today(), -1)));
