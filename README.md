@@ -11,7 +11,9 @@
 - **沒有後端**。資料只存在使用者裝置（localStorage）和他自己的 Google 試算表。
 - **舊的完整版**：v0.16.1 以前有銀行、信用卡、股票、雲端發票、LINE Pay、報表等功能，保存在 `backup/full-v0.16.1` 分支，**不要刪**。
 
-目前版本：v1.6.0，資料格式版本 7。
+目前版本：v1.6.1，資料格式版本 7。
+
+- 自動登入：純前端沒有 refresh token，所以做不到完全不點。App 開啟時若 localStorage 的 token 還有一分鐘以上就直接用（`resume()`）；否則登入過、且沒有按「登出」時，第一次點畫面任何地方就呼叫 `connect({ auto: true })`（`autoConnect()`，capture 階段，每次回到前景最多試一次；連接 Google 相關按鈕除外）。自動嘗試的彈窗失敗不顯示錯誤。登出、401、權限錯誤都會清掉 token。token 只有 `drive.file` 範圍、約一小時就失效，CSP 也只允許本站和 Google 登入元件的腳本，所以接受放在 localStorage 的風險。
 
 ## 架構
 
@@ -20,10 +22,10 @@
 | `cloud/cash.mjs` | 純邏輯：記帳驗證、渠道、現金餘額、合併、各工作表欄位與讀寫格式、自訂選項。不碰網路與 DOM。 |
 | `cloud/cash-local.mjs` | 手機上的記帳、設定、選項與待同步清單（localStorage `cash-ledger-v1`）。 |
 | `cloud/cash-store.mjs` | Google Drive／Sheets：尋找或建立試算表、補齊工作表、同步。 |
-| `cloud/auth.mjs` | Google Identity Services 授權（Token 只在記憶體）。 |
+| `cloud/auth.mjs` | Google Identity Services 授權（要在使用者點擊時呼叫，否則瀏覽器會擋彈出視窗）。 |
 | `cloud/categories.mjs` | 內建分類樹與圖示。 |
 | `cloud/config.mjs` | OAuth Client ID。 |
-| `cloud/login-preferences.mjs` | 記住上次登入的 Google 帳號（只存 email，供 login hint 使用）。 |
+| `cloud/login-preferences.mjs` | 記住上次登入的 Google 帳號（email，供 login hint）、約一小時的 access token 與到期時間（`finance-google-token-v1`）、是否在第一次點擊時自動登入（`finance-auto-login-v1`）。 |
 | `web/app.mjs` | 畫面：首頁、記一筆、設定、首次詢問現金。 |
 | `web/rows.mjs` | 一列式清單元件。 |
 | `web/pwa.mjs`、`tools/build-sw.cjs` → `sw.js` | 離線快取（只快取公開的程式檔）。 |

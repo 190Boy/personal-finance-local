@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { REMEMBER_KEY, rememberedAccount, rememberAccount } from '../cloud/login-preferences.mjs';
+import {
+  REMEMBER_KEY,
+  rememberedAccount,
+  rememberAccount,
+  TOKEN_KEY,
+  savedToken,
+  saveToken,
+  autoLogin,
+  setAutoLogin
+} from '../cloud/login-preferences.mjs';
 const memory = () => {
   const values = new Map();
   return {
@@ -46,4 +55,31 @@ test('blocked storage does not prevent connection', () => {
   assert.equal(rememberedAccount(s), '');
   assert.equal(rememberAccount(s, 'sample@example.com'), false);
   assert.equal(rememberedAccount(null), '');
+});
+
+test('a saved token is used only while it still has more than a minute left', () => {
+  const s = memory();
+  const now = 1_000_000;
+  assert.equal(savedToken(s, now), null);
+  saveToken(s, 'tok', now + 30 * 60000);
+  assert.deepEqual(savedToken(s, now), { token: 'tok', expires: now + 30 * 60000 });
+  assert.equal(savedToken(s, now + 30 * 60000 - 30000), null); // under a minute left
+  assert.equal(s.values.has(TOKEN_KEY), false); // an expired token is removed
+  saveToken(s, 'tok', now + 30 * 60000);
+  saveToken(s, '', 0); // sign-out
+  assert.equal(s.values.size, 0);
+  for (const v of ['bad', '{"token":1,"expires":9e15}', '{"token":"t"}']) {
+    s.setItem(TOKEN_KEY, v);
+    assert.equal(savedToken(s, now), null);
+    assert.equal(s.values.size, 0);
+  }
+});
+test('signing in on the first tap is off until a sign-in and off again after sign-out', () => {
+  const s = memory();
+  assert.equal(autoLogin(s), false);
+  setAutoLogin(s, true);
+  assert.equal(autoLogin(s), true);
+  setAutoLogin(s, false);
+  assert.equal(autoLogin(s), false);
+  assert.equal(s.values.size, 0);
 });

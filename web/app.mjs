@@ -21,7 +21,14 @@ import {
 import { CashLocal } from '../cloud/cash-local.mjs';
 import { CashStore, SCOPE } from '../cloud/cash-store.mjs';
 import { loadGis, requestToken } from '../cloud/auth.mjs';
-import { rememberedAccount, rememberAccount } from '../cloud/login-preferences.mjs';
+import {
+  rememberedAccount,
+  rememberAccount,
+  savedToken,
+  saveToken,
+  autoLogin,
+  setAutoLogin
+} from '../cloud/login-preferences.mjs';
 import { CATEGORY_TREE, iconOf } from '../cloud/categories.mjs';
 import { row, dayHeader, groupByDay, yuan, CATEGORY_COLORS } from './rows.mjs';
 import { initPwa } from './pwa.mjs';
@@ -636,32 +643,80 @@ function drawStatus() {
       ' 元。'
     : '還沒設定。';
 }
-async function connect({ chooser = false } = {}) {
-  if (syncing) return;
+let connecting = false,
+  autoTried = false; // signing in on the first tap is tried once each time the app comes to the front
+// auto: started by any tap after a past sign-in, not by a sign-in button. Its popup problems stay quiet,
+// since the user did not ask; the sync chip still offers to connect.
+async function connect({ chooser = false, auto = false } = {}) {
+  if (syncing || connecting) return;
+  connecting = true;
   try {
-    await loadGis();
-  } catch {
-    lastError = messages.GOOGLE_NETWORK;
-    drawStatus();
-    return;
+    try {
+      await loadGis();
+    } catch {
+      lastError = messages.GOOGLE_NETWORK;
+      drawStatus();
+      return;
+    }
+    try {
+      const token = await requestToken({ scope: SCOPE, hint: remembered, chooser });
+      store.authorize(token.access_token, token.expires_in);
+      saveToken(storage, token.access_token, Date.now() + Number(token.expires_in) * 1000);
+      const user = await store.profile();
+      remembered = user.emailAddress || '';
+      rememberAccount(storage, remembered);
+      setAutoLogin(storage, true);
+      autoTried = false;
+      await openAndSync();
+    } catch (error) {
+      lastError =
+        auto && (error.message === 'GOOGLE_POPUP' || error.message === 'GOOGLE_PERMISSION')
+          ? ''
+          : messages[error.message] || 'Google 連接失敗。';
+      if (error.message === 'GOOGLE_PERMISSION' || error.message === 'GOOGLE_API') {
+        store.disconnect();
+        saveToken(storage, '', 0);
+      }
+      drawStatus();
+    }
+  } finally {
+    connecting = false;
   }
+}
+async function openAndSync() {
+  await store.open(local.state.fileId);
+  local.state.fileId = store.file.id;
+  local.save();
+  lastError = '';
+  await sync();
+  if (store.connected && !local.setting) askCash();
+}
+// Reopened within the hour a Google token lasts: carry on without a sign-in.
+async function resume() {
+  const t = savedToken(storage);
+  if (!t) return false;
+  store.authorize(t.token, (t.expires - Date.now()) / 1000);
+  connecting = true;
   try {
-    const token = await requestToken({ scope: SCOPE, hint: remembered, chooser });
-    store.authorize(token.access_token, token.expires_in);
-    const user = await store.profile();
-    remembered = user.emailAddress || '';
-    rememberAccount(storage, remembered);
-    await store.open(local.state.fileId);
-    local.state.fileId = store.file.id;
-    local.save();
-    lastError = '';
-    await sync();
-    if (store.connected && !local.setting) askCash();
+    await openAndSync();
   } catch (error) {
-    lastError = messages[error.message] || 'Google 連接失敗。';
-    if (error.message === 'GOOGLE_PERMISSION' || error.message === 'GOOGLE_API') store.disconnect();
+    // An expired or revoked token: forget it; the next tap signs in again.
+    if (!store.connected) saveToken(storage, '', 0);
+    else lastError = messages[error.message] || 'Google 連接失敗。';
     drawStatus();
+  } finally {
+    connecting = false;
   }
+  return true;
+}
+// After a past sign-in, the first tap anywhere signs in (a popup needs a tap). Buttons that sign in
+// themselves are left alone.
+function autoConnect(event) {
+  if (store.connected || connecting || syncing || autoTried || !remembered || !autoLogin(storage)) return;
+  if (!navigator.onLine) return;
+  if (event.target.closest?.('#connectButton, #switchButton, #syncChip, #welcomeConnect')) return;
+  autoTried = true;
+  void connect({ auto: true });
 }
 function showNotice(text, kind) {
   const n = $('syncNotice');
@@ -704,6 +759,7 @@ async function sync() {
       );
   } finally {
     syncing = false;
+    if (!store.connected) saveToken(storage, '', 0);
     refresh();
   }
   if (syncAgain) {
@@ -717,6 +773,8 @@ function queueSync() {
 }
 function logout() {
   store.disconnect();
+  saveToken(storage, '', 0);
+  setAutoLogin(storage, false);
   lastError = '';
   refresh();
 }
@@ -1218,7 +1276,15 @@ function init() {
   });
   // Coming back to the app: sync whatever was recorded while away.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && local.pendingCount) queueSync();
+    if (document.visibilityState !== 'visible') return;
+    autoTried = false;
+    if (local.pendingCount) queueSync();
+  });
+  document.addEventListener('click', autoConnect, true);
+  // Reopened within the token's hour: sync straight away. Otherwise get Google's script ready, so the
+  // first tap can open the sign-in popup at once.
+  void resume().then(resumed => {
+    if (!resumed && autoLogin(storage) && remembered) void loadGis().catch(() => {});
   });
   window.addEventListener('online', queueSync);
   window.addEventListener('hashchange', route);
