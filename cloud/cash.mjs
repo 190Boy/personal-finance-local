@@ -27,16 +27,18 @@ export const LOG_HEADERS = [
   '建立時間',
   '更新時間',
   '渠道',
-  '轉入'
+  '轉入',
+  '排序'
 ];
 // v1.0.0 sheets have no 渠道 column (read as cash); before v1.5.0 there is no 轉入 column (a top-up went into
-// LINE Pay). Both are upgraded on the next sync.
+// LINE Pay); before v1.8.0 there is no 排序 column. All are upgraded on the next sync.
 export const LOG_HEADERS_V1 = LOG_HEADERS.slice(0, 11);
 export const LOG_HEADERS_V2 = LOG_HEADERS.slice(0, 12);
+export const LOG_HEADERS_V3 = LOG_HEADERS.slice(0, 13);
 export const DETAIL_SHEET = '記帳明細';
 export const DETAIL_HEADERS = [
   '日期',
-  '時間',
+  '排序',
   '類型',
   '渠道',
   '轉入',
@@ -64,7 +66,7 @@ export const MONTH_HEADERS = [
   '月底餘額（元）'
 ];
 // 試算表欄位或資料意義有變時加 1，並同步更新 BOT 說明書（見 README）。1 = v1.0.0；2 = v1.1.0 起（渠道、選項）；3 = v1.2.0 起（記帳明細可直接打字）；4 = v1.3.0 起（預設渠道指定銀行與信用卡）；5 = v1.4.0 起（LINE Pay 結餘、儲值）；6 = v1.5.0 起（多個錢包、轉入、錢包工作表）。
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 export const SETTING_SHEET = '設定';
 export const SETTING_HEADERS = ['項目', '內容', '說明'];
 // 每個錢包一列：起始餘額與日期（空白表示還沒設定）、目前餘額；刪掉的錢包狀態是「已刪除」。
@@ -112,7 +114,10 @@ export function makeEntry(input, now = new Date().toISOString()) {
   const e = {
     id: String(input.id || '').trim(),
     date: String(input.date || ''),
+    // Kept from records made before v1.8.0, when a time could be filled in; only used to order those.
     time: String(input.time || '').slice(0, 5),
+    // The record's place in its day (排序): bigger is later. Blank on records from before v1.8.0.
+    rank: rankOf(input.rank),
     type: String(input.type || '支出'),
     amountCents: Number.isSafeInteger(input.amountCents) ? input.amountCents : parseCents(input.amount),
     category: String(input.category || '').trim(),
@@ -168,11 +173,57 @@ export const walletOf = (e, wallets) =>
 export const moves = (e, account) => (flowsOf(e)[account] || 0) !== 0;
 // The record's effect on the cash balance (0 when it does not touch cash).
 export const flowOf = e => flowsOf(e)[CASH] || 0;
-const order = (a, b) =>
-  a.date.localeCompare(b.date) ||
+// A 排序 value: a whole number from 1, or null for none.
+function rankOf(v) {
+  const n = typeof v === 'number' ? v : String(v ?? '').trim() === '' ? NaN : Number(String(v).trim());
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+const legacy = (a, b) =>
   (a.time || '').localeCompare(b.time || '') ||
   a.createdAt.localeCompare(b.createdAt) ||
   a.id.localeCompare(b.id);
+// Records of one day in order. A record's key is its 排序; records from before v1.8.0 have none and are keyed
+// 1, 2, 3… in their old order (time, then when made), so new records (numbered after them) come later.
+function sortDay(list) {
+  const keys = new Map();
+  list
+    .filter(e => e.rank == null)
+    .sort(legacy)
+    .forEach((e, i) => keys.set(e.id, i + 1));
+  const key = e => e.rank ?? keys.get(e.id);
+  return list.sort((a, b) => key(a) - key(b) || legacy(a, b));
+}
+// Live records in order: by date, then by place in the day. Each copy carries `position`, 1, 2, 3… in its day.
+export function inOrder(entries) {
+  const days = new Map();
+  for (const e of entries) {
+    if (e.deleted) continue;
+    if (!days.has(e.date)) days.set(e.date, []);
+    days.get(e.date).push(e);
+  }
+  return [...days.keys()]
+    .sort()
+    .flatMap(d => sortDay(days.get(d)).map((e, i) => ({ ...e, position: i + 1 })));
+}
+// The 排序 that puts a record last on its day.
+export function nextRank(entries, date, exceptId = '') {
+  const day = inOrder([...entries].filter(e => e.date === date && e.id !== exceptId));
+  return day.length ? Math.max(day.length, ...day.map(e => e.rank || 0)) + 1 : 1;
+}
+// Put record e at place `at` (1 = first) on its day; every record of that day gets 排序 1, 2, 3…
+// Returns the records that changed (e always), stamped with `now`.
+export function placeInDay(entries, e, at, now) {
+  const day = inOrder([...entries].filter(x => x.date === e.date && x.id !== e.id));
+  const i = Math.min(Math.max(Math.round(at) - 1, 0), day.length);
+  day.splice(i, 0, e);
+  const out = [];
+  day.forEach((x, n) => {
+    if (x.id === e.id) out.push({ ...stripView(e), rank: n + 1, updatedAt: now });
+    else if (x.rank !== n + 1) out.push({ ...stripView(x), rank: n + 1, updatedAt: now });
+  });
+  return out;
+}
+const stripView = ({ position, ...e }) => e; // eslint-disable-line no-unused-vars
 
 // Newest version of each record wins; on a tie the later one in the list wins.
 export function latest(list) {
@@ -218,13 +269,14 @@ export function logRow(e) {
     e.createdAt,
     e.updatedAt,
     e.channel,
-    e.to
+    e.to,
+    e.rank ?? ''
   ];
 }
 export function readLog(values) {
   if (!values.length) return [];
   const head = JSON.stringify(values[0]);
-  if (![LOG_HEADERS, LOG_HEADERS_V2, LOG_HEADERS_V1].some(h => head === JSON.stringify(h)))
+  if (![LOG_HEADERS, LOG_HEADERS_V3, LOG_HEADERS_V2, LOG_HEADERS_V1].some(h => head === JSON.stringify(h)))
     throw Error('SHEET_SCHEMA');
   const out = [];
   for (const r of values.slice(1)) {
@@ -243,7 +295,8 @@ export function readLog(values) {
           createdAt: String(r[9] || ''),
           updatedAt: String(r[10] || ''),
           channel: String(r[11] || CASH),
-          to: String(r[12] || '')
+          to: String(r[12] || ''),
+          rank: r[13]
         })
       );
     } catch {
@@ -314,18 +367,15 @@ export function mergeWallets(local, remote) {
 export function ledger(entries, setting, wallets = new Map()) {
   wallets = asWallets(wallets);
   const names = walletNames(wallets);
-  const out = [...entries]
-    .filter(e => !e.deleted)
-    .sort(order)
-    .map(e => ({
-      ...e,
-      amountSigned: amountOf(e),
-      flowCents: flowOf(e),
-      balanceCents: null,
-      wallet: walletOf(e, names),
-      walletCents: null,
-      walletBalances: {}
-    }));
+  const out = inOrder(entries).map(e => ({
+    ...e,
+    amountSigned: amountOf(e),
+    flowCents: flowOf(e),
+    balanceCents: null,
+    wallet: walletOf(e, names),
+    walletCents: null,
+    walletBalances: {}
+  }));
   runBalance(out, CASH, setting, (e, v) => (e.balanceCents = v));
   for (const name of names) {
     const a = anchorOf(wallets.get(name));
@@ -426,7 +476,7 @@ export function detailRows(rows) {
       const [main = '', sub = ''] = e.category.split('／');
       return [
         e.date,
-        e.time,
+        e.position ?? '',
         e.type,
         e.channel,
         e.to,
@@ -674,7 +724,8 @@ const ROW_REASONS = {
   CASH_TOPUP: '儲值的渠道要填錢從哪裡來（例如現金、玉山銀行），「轉入」填要儲值的錢包，兩個不能一樣',
   CASH_AMOUNT: '金額要是大於 0 的數字',
   CASH_CHANNEL: '渠道不能是空的',
-  CASH_ID: 'ID 不正確，新增的列請讓 ID 留空'
+  CASH_ID: 'ID 不正確，新增的列請讓 ID 留空',
+  CASH_RANK: '排序要是 1 以上的整數，或留空'
 };
 // values: the 記帳明細 sheet as read; known: the stored records by ID.
 // Returns { changes: records to save, problems: [{ row, reason }] }.
@@ -688,15 +739,20 @@ export function readDetailEdits(
   if (!values.length) return { changes, problems };
   const head = values[0].map(h => String(h).trim());
   const col = name => head.indexOf(name);
-  const need = ['日期', '時間', '類型', '渠道', '金額（元）', '主分類', '子分類', '對象／商店', '備註', 'ID'];
+  const need = ['日期', '類型', '渠道', '金額（元）', '主分類', '子分類', '對象／商店', '備註', 'ID'];
   const missing = need.filter(n => col(n) < 0);
   if (missing.length)
     return {
       changes,
       problems: [{ row: 1, reason: '找不到欄位：' + missing.join('、') + '。請還原第一列的欄名' }]
     };
-  // 轉入 is optional: sheets from before v1.5.0 do not have it.
+  // 轉入 is optional (sheets from before v1.5.0 do not have it). Sheets from before v1.8.0 have 時間 where
+  // newer ones have 排序.
   const cell = (r, name) => (col(name) < 0 ? '' : (r[col(name)] ?? ''));
+  const hasRank = col('排序') >= 0,
+    hasTime = col('時間') >= 0;
+  const positions = new Map(inOrder(known.values()).map(e => [e.id, e.position]));
+  const moves = []; // { e, at }: records whose 排序 was typed or changed, placed once all rows are read
   values.slice(1).forEach((r, i) => {
     const row = i + 2;
     if (!r.some(v => String(v ?? '').trim() !== '')) return;
@@ -708,7 +764,8 @@ export function readDetailEdits(
       return;
     }
     const date = looseDate(cell(r, '日期'));
-    const time = looseTime(cell(r, '時間'));
+    const time = hasTime ? looseTime(cell(r, '時間')) : old?.time || '';
+    const rankText = hasRank ? String(cell(r, '排序')).trim() : '';
     const type = typeText || '支出';
     const main = String(cell(r, '主分類')).trim(),
       sub = String(cell(r, '子分類')).trim();
@@ -719,10 +776,13 @@ export function readDetailEdits(
     try {
       if (!date) throw Error('CASH_DATE');
       if (time === null) throw Error('CASH_TIME');
+      const at = rankText === '' ? null : Number(rankText);
+      if (at !== null && !(Number.isSafeInteger(at) && at > 0)) throw Error('CASH_RANK');
       const e = makeEntry({
         id: id || newId(),
         date,
         time,
+        rank: old?.rank,
         type,
         amountCents: looseCents(cell(r, '金額（元）')),
         category,
@@ -733,13 +793,33 @@ export function readDetailEdits(
         createdAt: old?.createdAt || now,
         updatedAt: now
       });
-      if (old && !old.deleted && SAME.every(k => old[k] === e[k])) return;
-      changes.push(e);
+      // A new row, a row moved to another day, or a changed 排序 needs a place in its day.
+      const moved = !old || old.deleted || old.date !== e.date;
+      if (moved || (at !== null && at !== positions.get(id))) moves.push({ e, at, row });
+      else if (!SAME.every(k => old[k] === e[k])) changes.push(e);
     } catch (error) {
       problems.push({ row, reason: ROW_REASONS[error.message] || '這一列看不懂' });
     }
   });
-  return { changes, problems };
+  // Place moved records one by one, top row first, against the records as they stand after the earlier moves.
+  // A blank 排序 puts the record last on its day.
+  const all = new Map(known);
+  for (const e of changes) all.set(e.id, e);
+  for (const { e, at } of moves) {
+    if (at === null) all.set(e.id, { ...e, rank: nextRank(all.values(), e.date, e.id) });
+    else
+      for (const x of placeInDay(
+        [...all.values()].filter(x => x.id !== e.id),
+        e,
+        at,
+        now
+      ))
+        all.set(x.id, x);
+  }
+  const ids = new Set([...changes.map(e => e.id), ...moves.map(m => m.e.id)]);
+  // Records renumbered by a move change too.
+  for (const [id, x] of all) if (!ids.has(id) && x !== known.get(id)) ids.add(id);
+  return { changes: [...ids].map(id => all.get(id)), problems };
 }
 
 // Search: every word of the query must appear in the record's store, note, category, channel,

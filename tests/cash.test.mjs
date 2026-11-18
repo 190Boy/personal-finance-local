@@ -27,6 +27,9 @@ import {
   transferAccounts,
   categoryTree,
   readDetailEdits,
+  inOrder,
+  nextRank,
+  placeInDay,
   makeWallet,
   balanceNow,
   readWalletSetting,
@@ -112,7 +115,7 @@ test('cash counts from 00:00 on the setting day forwards and is worked out backw
   assert.deepEqual(
     pick(detail, 1, [
       '日期',
-      '時間',
+      '排序',
       '類型',
       '渠道',
       '轉入',
@@ -122,7 +125,7 @@ test('cash counts from 00:00 on the setting day forwards and is worked out backw
       '子分類',
       '記帳後現金（元）'
     ]),
-    ['2026-11-02', '', '支出', '現金', '', 500, -500, '餐飲', '午餐', 1000]
+    ['2026-11-02', 1, '支出', '現金', '', 500, -500, '餐飲', '午餐', 1000]
   );
   assert.deepEqual(monthRows(rows)[1], ['2026-11', '現金', 620, 1000, 3000, 300, 0, 6, 4580]);
 });
@@ -150,7 +153,7 @@ test('the newer version of a record or setting wins in either direction', () => 
     settingRows(setting, 0)
       .find(r => r[0] === '資料格式版本')
       .slice(0, 2),
-    ['資料格式版本', 7]
+    ['資料格式版本', 8]
   );
 });
 
@@ -384,7 +387,7 @@ test('a v1.0.0 sheet without the 渠道 column reads as cash and gets the new he
   const book = g.books.get('sheet1');
   book.values['異動紀錄'] = old;
   await s.ensureSheets();
-  assert.equal(book.values['異動紀錄'][0].at(-1), '轉入');
+  assert.equal(book.values['異動紀錄'][0].at(-1), '排序');
   const opt = makeOption({ kind: '渠道', name: '悠遊卡' });
   const r = await s.sync(new Map(), null, new Map([[optionKey(opt), opt]]));
   assert.equal(r.entries.get('old').channel, '現金');
@@ -453,18 +456,20 @@ test('rows typed in 記帳明細 come back: new rows, edits, 刪除, loose forma
   assert.deepEqual(
     [
       by.get('new1').date,
-      by.get('new1').time,
+      by.get('new1').rank,
       by.get('new1').type,
       by.get('new1').amountCents,
       by.get('new1').category,
       by.get('new1').channel
     ],
-    ['2026-11-13', '14:30', '支出', 120000, '交通／計程車', '現金']
+    ['2026-11-13', 1, '支出', 120000, '交通／計程車', '現金']
   );
   assert.equal(by.get('new2').category, '其他收入');
-  // Serial numbers from the spreadsheet also read as dates and times.
+  assert.equal(by.get('new2').rank, 2); // a blank 排序 puts a typed row last on its day
+  // Serial numbers from the spreadsheet also read as dates, and as times on a sheet from before v1.8.0.
+  const oldHead = DETAIL_HEADERS.map(h => (h === '排序' ? '時間' : h));
   const serial = readDetailEdits(
-    [DETAIL_HEADERS, row({ 日期: 46339, 時間: 0.5, '金額（元）': 1 })],
+    [oldHead, oldHead.map(h => ({ 日期: 46339, 時間: 0.5, '金額（元）': 1 })[h] ?? '')],
     new Map(),
     opts
   );
@@ -683,7 +688,7 @@ test('a v1.4.0 sheet and phone move the LINE Pay starting balance into the walle
   assert.equal(r.wallets.get('LINE Pay').cents, 174400);
   assert.equal(r.entries.get('old').to, 'LINE Pay');
   assert.equal(book.values['錢包'].find(x => x[0] === 'LINE Pay')[4], 1844);
-  assert.equal(book.values['異動紀錄'][0].at(-1), '轉入');
+  assert.equal(book.values['異動紀錄'][0].at(-1), '排序');
 });
 
 test('channels sit in editable groups, and 提款／存入 pick an account from banks, cards and others', () => {
@@ -758,4 +763,63 @@ test('search finds records by store, note, category, channel or exact amount, ev
   assert.deepEqual(find('16'), []); // amounts match exactly, not by part
   assert.deepEqual(find('   '), []);
   assert.equal(matchesSearch({ ...lunch, deleted: true }, searchWords('全聯')), false);
+});
+
+test('排序 orders a day: old records keep their time order, new ones go last, and a number moves a record', () => {
+  const now = '2026-11-18T08:00:00Z';
+  const mk = (id, more = {}) =>
+    makeEntry({
+      id,
+      type: '支出',
+      date: '2026-11-18',
+      amount: '10',
+      category: '餐飲',
+      createdAt: '2026-11-18T0' + id.length + ':00:00Z',
+      ...more
+    });
+  // Before v1.8.0: no 排序, ordered by time then when made.
+  const a = mk('a', { time: '09:00', createdAt: '2026-11-18T05:00:00Z' });
+  const b = mk('b', { time: '', createdAt: '2026-11-18T01:00:00Z' });
+  const c = mk('c', { time: '12:00', createdAt: '2026-11-18T02:00:00Z' });
+  let list = [a, b, c];
+  const ids = l => inOrder(l).map(e => e.id + e.position);
+  assert.deepEqual(ids(list), ['b1', 'a2', 'c3']);
+  // A new record goes last; so does one typed with no number.
+  const d = { ...mk('d'), rank: nextRank(list, '2026-11-18') };
+  assert.equal(d.rank, 4);
+  list.push(d);
+  assert.deepEqual(ids(list), ['b1', 'a2', 'c3', 'd4']);
+  // Moving d to 1 renumbers the day; every record whose 排序 changed is returned.
+  const moved = placeInDay(list, d, 1, now);
+  assert.deepEqual(
+    moved.map(e => e.id + e.rank),
+    ['d1', 'b2', 'a3', 'c4']
+  );
+  assert.ok(moved.every(e => e.updatedAt === now && !('position' in e)));
+  list = moved;
+  // Out-of-range numbers clamp; deleted records do not count.
+  assert.deepEqual(ids(placeInDay(list, list[0], 99, now)), ['b1', 'a2', 'c3', 'd4']);
+  assert.equal(nextRank([...list, { ...mk('x'), rank: 9, deleted: true }], '2026-11-18'), 5);
+  assert.equal(nextRank(list, '2026-11-19'), 1);
+  // 排序 travels through the 異動紀錄 sheet.
+  assert.equal(readLog([LOG_HEADERS, logRow(list[0])])[0].rank, list[0].rank);
+  assert.equal(makeEntry({ ...list[0], rank: '0' }).rank, null);
+});
+
+test('changing 排序 in 記帳明細 moves the record and renumbers its day', () => {
+  const now = '2026-11-18T09:00:00Z';
+  const mk = (id, rank) =>
+    makeEntry({ id, type: '支出', date: '2026-11-18', amount: '10', category: '餐飲', rank, createdAt: now });
+  const known = new Map(['p', 'q', 'r'].map((id, i) => [id, mk(id, i + 1)]));
+  const sheet = detailRows(ledger(known.values(), null));
+  assert.deepEqual(readDetailEdits(sheet, known), { changes: [], problems: [] });
+  const typed = structuredClone(sheet);
+  const R = typed[0].indexOf('排序');
+  typed[3][R] = 1; // r to the top
+  const out = readDetailEdits(typed, known, { now });
+  assert.deepEqual(out.changes.map(e => e.id + e.rank).sort(), ['p2', 'q3', 'r1']);
+  typed[3][R] = '第一';
+  assert.deepEqual(readDetailEdits(typed, known, { now }).problems, [
+    { row: 4, reason: '排序要是 1 以上的整數，或留空' }
+  ]);
 });

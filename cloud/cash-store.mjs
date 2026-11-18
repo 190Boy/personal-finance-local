@@ -12,6 +12,7 @@ import {
   OPTION_SHEET,
   LOG_HEADERS_V1,
   LOG_HEADERS_V2,
+  LOG_HEADERS_V3,
   WALLET_SHEET,
   readWallets,
   mergeWallets,
@@ -160,7 +161,7 @@ export class CashStore {
     // Empty, or a v1.0.0 log without the 渠道 column: write the current header row (old rows read as cash).
     if (
       !log.length ||
-      [LOG_HEADERS_V1, LOG_HEADERS_V2].some(h => JSON.stringify(log[0]) === JSON.stringify(h))
+      [LOG_HEADERS_V1, LOG_HEADERS_V2, LOG_HEADERS_V3].some(h => JSON.stringify(log[0]) === JSON.stringify(h))
     )
       await this.api(SHEETS + '/' + id + '/values/' + range(LOG_SHEET, 'A1') + '?valueInputOption=RAW', {
         method: 'PUT',

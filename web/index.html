@@ -18,7 +18,7 @@
 </head>
 <body>
 <a class="skip" href="#main">跳到主要內容</a>
-<header class="topbar"><div class="wrap topbar-in"><img src="./icons/icon-192.png" alt="" width="28" height="28"><strong>現金記帳</strong><span class="version" id="appVersion">v1.7.0</span><button id="syncChip" class="sync-chip" type="button" aria-live="polite">未連接</button></div></header>
+<header class="topbar"><div class="wrap topbar-in"><img src="./icons/icon-192.png" alt="" width="28" height="28"><strong>現金記帳</strong><span class="version" id="appVersion">v1.8.0</span><button id="syncChip" class="sync-chip" type="button" aria-live="polite">未連接</button></div></header>
 <main id="main" class="wrap">
 
 <section id="view-home" data-route="home" hidden>
@@ -42,7 +42,7 @@
 <div id="categoryPicker" hidden><div id="categoryGrid" class="category-grid"></div><div id="subGrid" class="sub-grid"></div></div>
 <div id="optionAdder" class="adder" hidden><span id="optionAdderLabel" class="adder-label"></span><input id="optionIcon" maxlength="4" autocomplete="off" placeholder="🏷️" aria-label="圖示（選填，可放一個表情符號）"><select id="optionGroup" aria-label="放在哪一組" hidden><option>銀行</option><option>信用卡</option><option>其他</option></select><input id="optionName" maxlength="20" autocomplete="off" aria-label="名稱"><button id="optionAdd" type="button">新增</button><button id="optionCancel" type="button" class="secondary">取消</button></div>
 <div class="date-step"><button type="button" id="prevDay" class="icon-btn" aria-label="前一天">◀</button><input id="date" type="date" aria-label="日期"><button type="button" id="nextDay" class="icon-btn" aria-label="後一天">▶</button></div>
-<div class="field-row"><label id="partyField"><span id="partyLabel">對象／商店</span><input id="party" maxlength="60" autocomplete="off" placeholder="選填"></label><label class="narrow">時間<input id="time" type="time"></label></div>
+<div class="field-row"><label id="partyField"><span id="partyLabel">對象／商店</span><input id="party" maxlength="60" autocomplete="off" placeholder="選填"></label><label class="narrow">排序<input id="rank" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" placeholder="自動"></label></div><p id="rankHint" class="row-label"></p>
 <label class="field">備註<input id="note" maxlength="200" autocomplete="off" placeholder="選填"></label>
 <details id="keypadBox" class="keypad-box"><summary>計算機</summary><div id="keypad" class="keypad"></div></details>
 <p id="formContext" class="hint" hidden></p>
@@ -58,7 +58,7 @@
 <section class="card"><h2>錢包</h2><p class="small muted">錢包和現金一樣有自己的結餘：填進去的金額記成今天 00:00，之後渠道選這個錢包的支出會扣、收入會加，「儲值」轉進來會加。每一筆都記，結餘才會和 App 裡顯示的一致。</p><div id="walletList" class="wallet-list"></div><form id="walletAddForm" class="inline-form wallet-add"><label class="field">新增錢包<input id="walletName" maxlength="20" autocomplete="off" placeholder="例如 悠遊卡"></label><label class="field">現在裡面的錢（元，選填）<input id="walletStart" inputmode="decimal" autocomplete="off" placeholder="之後再填也可以"></label><button type="submit">新增</button></form><p id="walletStatus" class="status" role="status" aria-live="polite"></p></section>
 <section class="card"><h2>渠道與分類</h2><p class="small muted">渠道分成銀行、信用卡、其他幾組；點一個渠道可以換組或移除，預設的也可以。「提款」「存入」會從銀行、信用卡、其他裡選帳戶。現金和錢包會算結餘（錢包在上面管理）；銀行和信用卡的記帳是給 BOT 對帳用的參考。</p><div id="channelGroups" class="channel-groups"></div><form id="channelForm" class="inline-form channel-add"><label class="field">新增渠道<input id="channelName" maxlength="20" autocomplete="off" placeholder="例如 台新銀行"></label><label class="field">放在<select id="channelGroup"><option>銀行</option><option>信用卡</option><option>其他</option></select></label><button type="submit">新增</button></form><p class="small muted">自己的分類和子分類，可以在記一筆的分類裡按「＋ 新增」加入；點下面自己新增的分類可以改圖案。</p><div id="ownOptions" class="own-options"></div><p id="optionStatus" class="status" role="status" aria-live="polite"></p></section>
 <section class="card"><h2>這台裝置</h2><p class="small muted">記帳會先存在這台裝置，連上 Google 後再同步，所以沒網路也能記。登出不會刪除這裡的記帳。</p><div class="actions"><button id="clearLocal" type="button" class="secondary danger">清除這台裝置的記帳</button><button id="installApp" type="button" class="secondary" hidden>加入主畫面</button></div><p id="localStatus" class="status" role="status" aria-live="polite"></p><p id="pwaStatus" class="small muted"></p></section>
-<p class="small muted">v1.7.0 · 現金與錢包記帳並算結餘，其他渠道供對帳參考。銀行、信用卡、股票等可匯出檔案的資料交給 BOT 整理。先前的完整版保存在 GitHub 的 backup/full-v0.16.1 分支。</p>
+<p class="small muted">v1.8.0 · 現金與錢包記帳並算結餘，其他渠道供對帳參考。銀行、信用卡、股票等可匯出檔案的資料交給 BOT 整理。先前的完整版保存在 GitHub 的 backup/full-v0.16.1 分支。</p>
 </section>
 </main>
 
