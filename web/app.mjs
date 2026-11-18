@@ -1,6 +1,9 @@
 // 現金記帳：記帳先存在這台裝置，連上 Google 後同步到你自己的「現金記帳」試算表。
 import {
   makeEntry,
+  inOrder,
+  nextRank,
+  placeInDay,
   ledger,
   cashNow,
   monthSummary,
@@ -63,6 +66,7 @@ const messages = {
   CASH_CHANNEL: '請選擇渠道。',
   CASH_TOPUP: '儲值的來源和轉入不能是同一個錢包。',
   OPTION_CASH: '「現金」是內建的，不用新增。',
+  CASH_RANK: '排序要填 1 以上的整數，或留空。',
   WALLET_CASH: '「現金」已經有自己的結餘，錢包請取別的名字。',
   OPTION_NAME: '請填寫名稱。',
   CASH_EXPRESSION: '金額算式看不懂，只支援數字與 + −。',
@@ -546,7 +550,8 @@ function fillForm(e = null) {
   showPicker(!e && type === '支出');
   $('amount').value = e ? String(e.amountCents / 100) : '';
   $('date').value = e?.date || today();
-  $('time').value = e?.time || '';
+  $('rank').value = e?.position ? String(e.position) : '';
+  drawRankHint();
   $('party').value = e?.party || '';
   $('note').value = e?.note || '';
   $('saveEntry').textContent = e ? '儲存修改' : '儲存';
@@ -559,9 +564,22 @@ function openEditor(e) {
   $('formStatus').textContent = '';
   location.hash = '#add';
 }
+// Under the 排序 box: how many records the chosen day has, so a number can be picked.
+function drawRankHint() {
+  const date = $('date').value || today();
+  const day = inOrder(local.entries.filter(e => e.date === date && e.id !== editing?.id));
+  $('rankHint').textContent = day.length
+    ? '排序：這天另有 ' +
+      day.length +
+      ' 筆，填 1～' +
+      (day.length + 1) +
+      '。數字大的排在首頁上面；' +
+      (editing ? '留空不變。' : '留空排在最上面（最新）。')
+    : '';
+}
 function saveForm(ev) {
   ev.preventDefault();
-  let entry;
+  let entry, placed;
   try {
     $('amount').value = evaluateAmount($('amount').value);
     const now = new Date().toISOString();
@@ -569,7 +587,8 @@ function saveForm(ev) {
       id: editing?.id || crypto.randomUUID(),
       type,
       date: $('date').value,
-      time: $('time').value,
+      time: editing?.time || '',
+      rank: editing?.rank,
       amount: $('amount').value,
       category,
       channel,
@@ -579,12 +598,23 @@ function saveForm(ev) {
       createdAt: editing?.createdAt || now,
       updatedAt: now
     });
+    // 排序: blank (or unchanged) keeps an edited record's place and puts a new one last on its day;
+    // a number moves it there, renumbering that day.
+    const rankText = $('rank').value.trim();
+    const at = rankText === '' ? null : Number(rankText);
+    if (at !== null && !(Number.isSafeInteger(at) && at > 0)) throw Error('CASH_RANK');
+    const sameDay = editing && editing.date === entry.date;
+    if (at !== null && !(sameDay && at === editing.position))
+      placed = placeInDay(local.entries, entry, at, now);
+    else if (!sameDay) entry = { ...entry, rank: nextRank(local.entries, entry.date, entry.id) };
   } catch (error) {
     $('formStatus').textContent = messages[error.message] || '請檢查填寫的內容。';
     if (error.message === 'CASH_CATEGORY') showPicker(true);
     return;
   }
-  const saved = local.put(entry);
+  let saved = true;
+  for (const x of placed || [entry]) saved = local.put(x) && saved;
+  if (placed) entry = placed.find(x => x.id === entry.id);
   const label =
     (entry.to ? entry.channel + ' → ' + entry.to + ' ' : entry.channel === CASH ? '' : entry.channel + ' ') +
     (entry.category.split('／').pop() || entry.type) +
@@ -1240,8 +1270,15 @@ function init() {
     $('optionStatus').textContent = '已把「' + o.name + '」加到' + o.parent + '。';
     drawChannels();
   });
-  $('prevDay').addEventListener('click', () => ($('date').value = shiftDay($('date').value || today(), -1)));
-  $('nextDay').addEventListener('click', () => ($('date').value = shiftDay($('date').value || today(), 1)));
+  $('prevDay').addEventListener('click', () => {
+    $('date').value = shiftDay($('date').value || today(), -1);
+    drawRankHint();
+  });
+  $('date').addEventListener('change', drawRankHint);
+  $('nextDay').addEventListener('click', () => {
+    $('date').value = shiftDay($('date').value || today(), 1);
+    drawRankHint();
+  });
   $('entryForm').addEventListener('submit', saveForm);
   $('cancelEdit').addEventListener('click', () => {
     fillForm();
